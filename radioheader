@@ -1,0 +1,647 @@
+#!/bin/bash
+set -e
+
+# RadioHeader CLI — Cross-project experience sharing for Claude Code
+# Usage: radioheader <command> [options]
+
+VERSION="1.0.0"
+CLAUDE_DIR="$HOME/.claude"
+RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
+TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
+TOPICS_DIR="$RADIOHEADER_DIR/topics"
+REGISTRY="$RADIOHEADER_DIR/project-registry.md"
+INDEX="$RADIOHEADER_DIR/INDEX.md"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+info()  { echo -e "${BLUE}[RadioHeader]${NC} $1"; }
+ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[RadioHeader]${NC} $1"; }
+err()   { echo -e "${RED}[RadioHeader]${NC} $1"; }
+
+# Cross-platform sed -i
+sedi() {
+  if [[ "$OSTYPE" == darwin* ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
+# ============================================================
+# help
+# ============================================================
+
+cmd_help() {
+  cat <<EOF
+
+${BOLD}RadioHeader CLI${NC} v${VERSION}
+Cross-project experience sharing for Claude Code
+
+${BOLD}USAGE${NC}
+  radioheader <command> [options]
+
+${BOLD}COMMANDS${NC}
+  init      Initialize dynamic experience framework in current project
+  search    Search RadioHeader topics
+  status    Show RadioHeader status
+  doctor    Run health checks
+  help      Show this help message
+
+${BOLD}EXAMPLES${NC}
+  radioheader init
+  radioheader init --name "MyApp" --stack "iOS/SwiftUI"
+  radioheader search "NavigationStack"
+  radioheader search "white screen|slow launch"
+  radioheader status
+  radioheader doctor
+
+EOF
+}
+
+# ============================================================
+# init
+# ============================================================
+
+cmd_init() {
+  local project_name=""
+  local tech_stack=""
+  local doc_dir="projectBasicInfo"
+  local terminology="(none)"
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --name)     project_name="$2"; shift 2 ;;
+      --stack)    tech_stack="$2"; shift 2 ;;
+      --doc-dir)  doc_dir="$2"; shift 2 ;;
+      --terms)    terminology="$2"; shift 2 ;;
+      --help|-h)
+        cat <<EOF
+${BOLD}radioheader init${NC} — Initialize dynamic experience framework
+
+${BOLD}FLAGS${NC}
+  --name <name>     Project name (required)
+  --stack <stack>    Tech stack, e.g. "iOS/SwiftUI" (required)
+  --doc-dir <dir>   Documentation directory name (default: projectBasicInfo)
+  --terms <terms>   Terminology mappings (optional)
+
+${BOLD}INTERACTIVE MODE${NC}
+  Run without flags to be prompted for each value.
+
+EOF
+        return 0
+        ;;
+      *)
+        err "Unknown flag: $1"
+        return 1
+        ;;
+    esac
+  done
+
+  # Pre-checks
+  if [ ! -d "$RADIOHEADER_DIR" ]; then
+    err "RadioHeader is not installed. Run install.sh first."
+    return 1
+  fi
+
+  if [ ! -d "$TEMPLATES_DIR" ]; then
+    err "Project templates not found at $TEMPLATES_DIR"
+    err "Re-run install.sh to install templates."
+    return 1
+  fi
+
+  # Check if already initialized
+  if [ -f ".claude/rules/memory-reflux.md" ]; then
+    warn "This project appears to be already initialized (.claude/rules/memory-reflux.md exists)."
+    read -p "Re-initialize? Existing files will NOT be overwritten. [y/N] " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      info "Aborted."
+      return 0
+    fi
+  fi
+
+  # Interactive mode if flags not provided
+  if [ -z "$project_name" ]; then
+    echo ""
+    echo -e "${BOLD}RadioHeader Project Init${NC}"
+    echo -e "${DIM}Setting up the dynamic experience framework for this project.${NC}"
+    echo ""
+
+    read -p "Project name: " project_name
+    if [ -z "$project_name" ]; then
+      err "Project name is required."
+      return 1
+    fi
+
+    read -p "Tech stack (e.g. iOS/SwiftUI, Python/FastAPI): " tech_stack
+    if [ -z "$tech_stack" ]; then
+      err "Tech stack is required."
+      return 1
+    fi
+
+    read -p "Documentation directory name [projectBasicInfo]: " input_doc_dir
+    if [ -n "$input_doc_dir" ]; then
+      doc_dir="$input_doc_dir"
+    fi
+
+    read -p "Terminology mappings (optional, press Enter to skip): " terminology
+    if [ -z "$terminology" ]; then
+      terminology="(none)"
+    fi
+  fi
+
+  # Validate required fields
+  if [ -z "$project_name" ] || [ -z "$tech_stack" ]; then
+    err "Both --name and --stack are required."
+    return 1
+  fi
+
+  echo ""
+  info "Initializing project: ${BOLD}$project_name${NC}"
+  info "Tech stack: $tech_stack"
+  info "Doc directory: $doc_dir"
+
+  # --- Create directory structure ---
+
+  mkdir -p ".claude/hooks"
+  mkdir -p ".claude/rules"
+  mkdir -p "$doc_dir/logs"
+
+  # --- Copy and process template files ---
+
+  # CLAUDE.md
+  if [ -f "CLAUDE.md" ]; then
+    warn "CLAUDE.md already exists, skipping (not overwriting)"
+  else
+    cp "$TEMPLATES_DIR/CLAUDE.md.template" "CLAUDE.md"
+    sedi "s|__PROJECT_NAME__|$project_name|g" "CLAUDE.md"
+    sedi "s|__TECH_STACK__|$tech_stack|g" "CLAUDE.md"
+    sedi "s|__TERMINOLOGY__|$terminology|g" "CLAUDE.md"
+    sedi "s|__DOC_DIR__|$doc_dir|g" "CLAUDE.md"
+    ok "Created CLAUDE.md"
+  fi
+
+  # .claude/settings.json
+  if [ -f ".claude/settings.json" ]; then
+    warn ".claude/settings.json already exists, skipping"
+  else
+    cp "$TEMPLATES_DIR/dot-claude/settings.json" ".claude/settings.json"
+    ok "Created .claude/settings.json"
+  fi
+
+  # .claude/hooks/load-project-rules.sh
+  if [ -f ".claude/hooks/load-project-rules.sh" ]; then
+    warn ".claude/hooks/load-project-rules.sh already exists, skipping"
+  else
+    cp "$TEMPLATES_DIR/dot-claude/hooks/load-project-rules.sh" ".claude/hooks/load-project-rules.sh"
+    chmod +x ".claude/hooks/load-project-rules.sh"
+    ok "Created .claude/hooks/load-project-rules.sh"
+  fi
+
+  # .claude/rules/
+  local rules=("memory-reflux.md" "logs-writing.md" "information-lookup.md")
+  for rule in "${rules[@]}"; do
+    if [ -f ".claude/rules/$rule" ]; then
+      warn ".claude/rules/$rule already exists, skipping"
+    else
+      cp "$TEMPLATES_DIR/dot-claude/rules/$rule" ".claude/rules/$rule"
+      sedi "s|__HOME__|$HOME|g" ".claude/rules/$rule"
+      sedi "s|__DOC_DIR__|$doc_dir|g" ".claude/rules/$rule"
+      ok "Created .claude/rules/$rule"
+    fi
+  done
+
+  # doc-dir files
+  if [ -f "$doc_dir/00_AGENT_RULES.md" ]; then
+    warn "$doc_dir/00_AGENT_RULES.md already exists, skipping"
+  else
+    cp "$TEMPLATES_DIR/doc-dir/00_AGENT_RULES.md" "$doc_dir/00_AGENT_RULES.md"
+    sedi "s|__PROJECT_NAME__|$project_name|g" "$doc_dir/00_AGENT_RULES.md"
+    ok "Created $doc_dir/00_AGENT_RULES.md"
+  fi
+
+  if [ -f "$doc_dir/01_PROJECT_OVERVIEW.md" ]; then
+    warn "$doc_dir/01_PROJECT_OVERVIEW.md already exists, skipping"
+  else
+    cp "$TEMPLATES_DIR/doc-dir/01_PROJECT_OVERVIEW.md" "$doc_dir/01_PROJECT_OVERVIEW.md"
+    sedi "s|__PROJECT_NAME__|$project_name|g" "$doc_dir/01_PROJECT_OVERVIEW.md"
+    sedi "s|__TECH_STACK__|$tech_stack|g" "$doc_dir/01_PROJECT_OVERVIEW.md"
+    ok "Created $doc_dir/01_PROJECT_OVERVIEW.md"
+  fi
+
+  # --- Register in project-registry.md ---
+
+  local project_path
+  project_path="$(pwd)"
+  local memory_path="$CLAUDE_DIR/projects/-$(echo "$project_path" | tr '/' '-')/memory"
+
+  if [ -f "$REGISTRY" ]; then
+    if grep -q "$project_path" "$REGISTRY" 2>/dev/null; then
+      warn "Project already registered in project-registry.md"
+    else
+      echo "| $project_name | $tech_stack | $project_path | $memory_path | active |" >> "$REGISTRY"
+      ok "Registered in project-registry.md"
+    fi
+  fi
+
+  # --- Done ---
+
+  echo ""
+  echo -e "${GREEN}========================================${NC}"
+  echo -e "${GREEN}  Project initialized successfully!${NC}"
+  echo -e "${GREEN}========================================${NC}"
+  echo ""
+  echo "Created:"
+  echo "  CLAUDE.md"
+  echo "  .claude/settings.json"
+  echo "  .claude/hooks/load-project-rules.sh"
+  echo "  .claude/rules/{memory-reflux,logs-writing,information-lookup}.md"
+  echo "  $doc_dir/{00_AGENT_RULES,01_PROJECT_OVERVIEW}.md"
+  echo "  $doc_dir/logs/"
+  echo ""
+  echo "Next: Open this project with Claude Code to start using RadioHeader."
+  echo ""
+}
+
+# ============================================================
+# search
+# ============================================================
+
+cmd_search() {
+  if [ -z "$1" ]; then
+    err "Usage: radioheader search \"keyword\""
+    err "Use | to separate multiple keywords: radioheader search \"keyword1|keyword2\""
+    return 1
+  fi
+
+  if [ ! -d "$TOPICS_DIR" ]; then
+    err "RadioHeader topics directory not found: $TOPICS_DIR"
+    err "Is RadioHeader installed?"
+    return 1
+  fi
+
+  local pattern="$1"
+  local topic_count
+  topic_count=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+
+  if [ "$topic_count" -eq 0 ]; then
+    warn "No topic files found in $TOPICS_DIR"
+    return 0
+  fi
+
+  echo -e "${DIM}Searching $topic_count topic files for: ${NC}${BOLD}$pattern${NC}"
+  echo ""
+
+  local results
+  results=$(grep -n -i -E "$pattern" "$TOPICS_DIR"/*.md 2>/dev/null || true)
+
+  if [ -z "$results" ]; then
+    warn "No matches found."
+    echo -e "${DIM}Tip: Try broader keywords or synonyms.${NC}"
+    return 0
+  fi
+
+  local match_count
+  match_count=$(echo "$results" | wc -l | tr -d ' ')
+  echo -e "${GREEN}Found $match_count match(es):${NC}"
+  echo ""
+
+  # Colorize output: filename in cyan, line number in yellow, match highlighted
+  echo "$results" | while IFS= read -r line; do
+    local file_part="${line%%:*}"
+    local rest="${line#*:}"
+    local linenum="${rest%%:*}"
+    local content="${rest#*:}"
+    local basename
+    basename=$(basename "$file_part")
+
+    echo -e "  ${CYAN}$basename${NC}:${YELLOW}$linenum${NC}: $content"
+  done
+
+  echo ""
+}
+
+# ============================================================
+# status
+# ============================================================
+
+cmd_status() {
+  echo ""
+  echo -e "${BOLD}RadioHeader Status${NC}"
+  echo ""
+
+  # --- Installation check ---
+  if [ ! -d "$RADIOHEADER_DIR" ]; then
+    err "RadioHeader is not installed."
+    return 1
+  fi
+
+  ok "Installed at $RADIOHEADER_DIR"
+
+  # --- Topic files ---
+  local topic_count=0
+  local entry_count=0
+  local latest_file=""
+  local latest_time=0
+
+  if [ -d "$TOPICS_DIR" ]; then
+    topic_count=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$topic_count" -gt 0 ]; then
+      # Count entries (lines starting with "- [")
+      entry_count=$(grep -r '^\- \[' "$TOPICS_DIR"/*.md 2>/dev/null | wc -l | tr -d ' ')
+
+      # Find most recently modified file
+      if [[ "$OSTYPE" == darwin* ]]; then
+        latest_file=$(find "$TOPICS_DIR" -name "*.md" -type f -exec stat -f '%m %N' {} + 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+      else
+        latest_file=$(find "$TOPICS_DIR" -name "*.md" -type f -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+      fi
+    fi
+  fi
+
+  echo -e "  Topic files:  ${BOLD}$topic_count${NC}"
+  echo -e "  Entries:      ${BOLD}$entry_count${NC}"
+  if [ -n "$latest_file" ]; then
+    echo -e "  Latest:       $(basename "$latest_file")"
+  fi
+
+  # --- Registered projects ---
+  local project_count=0
+  if [ -f "$REGISTRY" ]; then
+    project_count=$(grep -c '^|' "$REGISTRY" 2>/dev/null || echo "0")
+    # Subtract header rows (2: header + separator)
+    project_count=$((project_count > 2 ? project_count - 2 : 0))
+  fi
+  echo -e "  Projects:     ${BOLD}$project_count${NC} registered"
+
+  # --- Hooks check ---
+  echo ""
+  echo -e "${BOLD}Hooks${NC}"
+
+  local hooks=(
+    "check-project-architecture.sh"
+    "radioheader-loader.sh"
+    "radioheader-memory-sync.sh"
+    "radioheader-stop-reflux.sh"
+  )
+
+  local hooks_ok=0
+  for hook in "${hooks[@]}"; do
+    if [ -x "$CLAUDE_DIR/hooks/$hook" ]; then
+      echo -e "  ${GREEN}✓${NC} $hook"
+      hooks_ok=$((hooks_ok + 1))
+    else
+      echo -e "  ${RED}✗${NC} $hook"
+    fi
+  done
+
+  # --- CLAUDE.md check ---
+  echo ""
+  echo -e "${BOLD}Configuration${NC}"
+
+  if [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} CLAUDE.md has RadioHeader rules"
+  else
+    echo -e "  ${RED}✗${NC} CLAUDE.md missing RadioHeader rules"
+  fi
+
+  if [ -f "$CLAUDE_DIR/settings.json" ]; then
+    echo -e "  ${GREEN}✓${NC} settings.json exists"
+  else
+    echo -e "  ${RED}✗${NC} settings.json missing"
+  fi
+
+  if [ -d "$TEMPLATES_DIR" ]; then
+    echo -e "  ${GREEN}✓${NC} Project templates installed"
+  else
+    echo -e "  ${YELLOW}~${NC} Project templates not installed (CLI init won't work)"
+  fi
+
+  echo ""
+}
+
+# ============================================================
+# doctor
+# ============================================================
+
+cmd_doctor() {
+  echo ""
+  echo -e "${BOLD}RadioHeader Doctor${NC}"
+  echo ""
+
+  local issues=0
+
+  # --- Global installation ---
+  echo -e "${BOLD}Global Installation${NC}"
+
+  if [ ! -d "$RADIOHEADER_DIR" ]; then
+    echo -e "  ${RED}✗${NC} RadioHeader directory missing"
+    err "RadioHeader is not installed. Run install.sh first."
+    return 1
+  fi
+  echo -e "  ${GREEN}✓${NC} RadioHeader directory exists"
+
+  # Hooks
+  local hooks=(
+    "check-project-architecture.sh"
+    "radioheader-loader.sh"
+    "radioheader-memory-sync.sh"
+    "radioheader-stop-reflux.sh"
+  )
+
+  for hook in "${hooks[@]}"; do
+    if [ ! -f "$CLAUDE_DIR/hooks/$hook" ]; then
+      echo -e "  ${RED}✗${NC} Hook missing: $hook"
+      issues=$((issues + 1))
+    elif [ ! -x "$CLAUDE_DIR/hooks/$hook" ]; then
+      echo -e "  ${YELLOW}!${NC} Hook not executable: $hook"
+      issues=$((issues + 1))
+    else
+      echo -e "  ${GREEN}✓${NC} $hook"
+    fi
+  done
+
+  # CLAUDE.md
+  if [ -f "$CLAUDE_DIR/CLAUDE.md" ]; then
+    if grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+      echo -e "  ${GREEN}✓${NC} CLAUDE.md has RadioHeader markers"
+    else
+      echo -e "  ${RED}✗${NC} CLAUDE.md missing RadioHeader rules section"
+      issues=$((issues + 1))
+    fi
+  else
+    echo -e "  ${RED}✗${NC} CLAUDE.md not found"
+    issues=$((issues + 1))
+  fi
+
+  # settings.json
+  if [ -f "$CLAUDE_DIR/settings.json" ]; then
+    local missing_hooks=0
+    for hook in "${hooks[@]}"; do
+      if ! grep -q "$hook" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+        echo -e "  ${YELLOW}!${NC} settings.json missing reference to $hook"
+        missing_hooks=$((missing_hooks + 1))
+        issues=$((issues + 1))
+      fi
+    done
+    if [ "$missing_hooks" -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} settings.json has all hook references"
+    fi
+  else
+    echo -e "  ${RED}✗${NC} settings.json not found"
+    issues=$((issues + 1))
+  fi
+
+  # Templates
+  if [ -d "$TEMPLATES_DIR" ]; then
+    echo -e "  ${GREEN}✓${NC} Project templates installed"
+  else
+    echo -e "  ${YELLOW}!${NC} Project templates not installed (radioheader init won't work)"
+    issues=$((issues + 1))
+  fi
+
+  # --- Topic files ---
+  echo ""
+  echo -e "${BOLD}Topic Files${NC}"
+
+  if [ -d "$TOPICS_DIR" ]; then
+    local topic_count
+    topic_count=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    echo -e "  ${GREEN}✓${NC} $topic_count topic file(s)"
+
+    if [ "$topic_count" -gt 0 ]; then
+      # Check for entries missing [source:] tags
+      local untagged=0
+      untagged=$(grep -r '^\- [^[[]' "$TOPICS_DIR"/*.md 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$untagged" -gt 0 ]; then
+        echo -e "  ${YELLOW}!${NC} $untagged entries without [source:] tag"
+        issues=$((issues + 1))
+      else
+        echo -e "  ${GREEN}✓${NC} All entries have [source:] tags"
+      fi
+
+      # Check for empty files
+      local empty_files=0
+      for f in "$TOPICS_DIR"/*.md; do
+        if [ ! -s "$f" ]; then
+          echo -e "  ${YELLOW}!${NC} Empty file: $(basename "$f")"
+          empty_files=$((empty_files + 1))
+          issues=$((issues + 1))
+        fi
+      done
+      if [ "$empty_files" -eq 0 ]; then
+        echo -e "  ${GREEN}✓${NC} No empty files"
+      fi
+    fi
+  else
+    echo -e "  ${YELLOW}!${NC} Topics directory not found"
+    issues=$((issues + 1))
+  fi
+
+  # --- INDEX.md consistency ---
+  echo ""
+  echo -e "${BOLD}INDEX.md Consistency${NC}"
+
+  if [ -f "$INDEX" ]; then
+    if [ -d "$TOPICS_DIR" ]; then
+      local index_entries
+      index_entries=$(grep -c '\.md' "$INDEX" 2>/dev/null || echo "0")
+      local actual_files
+      actual_files=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+
+      if [ "$index_entries" -eq 0 ] && [ "$actual_files" -gt 0 ]; then
+        echo -e "  ${YELLOW}!${NC} INDEX.md has no topic entries but $actual_files topic files exist"
+        issues=$((issues + 1))
+      else
+        echo -e "  ${GREEN}✓${NC} INDEX.md has $index_entries references, $actual_files actual files"
+      fi
+
+      # Check for files in topics/ not listed in INDEX.md
+      local unlisted=0
+      for f in "$TOPICS_DIR"/*.md; do
+        [ -f "$f" ] || continue
+        local bname
+        bname=$(basename "$f")
+        if ! grep -q "$bname" "$INDEX" 2>/dev/null; then
+          echo -e "  ${YELLOW}!${NC} Topic not in INDEX: $bname"
+          unlisted=$((unlisted + 1))
+          issues=$((issues + 1))
+        fi
+      done
+      if [ "$unlisted" -eq 0 ] && [ "$actual_files" -gt 0 ]; then
+        echo -e "  ${GREEN}✓${NC} All topic files listed in INDEX.md"
+      fi
+    fi
+  else
+    echo -e "  ${RED}✗${NC} INDEX.md not found"
+    issues=$((issues + 1))
+  fi
+
+  # --- Project Registry ---
+  echo ""
+  echo -e "${BOLD}Project Registry${NC}"
+
+  if [ -f "$REGISTRY" ]; then
+    local stale=0
+    while IFS='|' read -r _ _ _ path _ _; do
+      path=$(echo "$path" | xargs) # trim whitespace
+      # Remove surrounding backticks if present
+      path="${path#\`}"
+      path="${path%\`}"
+      # Expand ~ to $HOME
+      path="${path/#\~/$HOME}"
+      if [ -n "$path" ] && [ "$path" != "Project Path" ] && [[ "$path" != -* ]] && [[ "$path" != *"add your"* ]] && [[ "$path" != *"项目"* ]]; then
+        if [ ! -d "$path" ]; then
+          echo -e "  ${YELLOW}!${NC} Stale project path: $path"
+          stale=$((stale + 1))
+          issues=$((issues + 1))
+        fi
+      fi
+    done < "$REGISTRY"
+
+    if [ "$stale" -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} All registered project paths are valid"
+    fi
+  else
+    echo -e "  ${YELLOW}!${NC} project-registry.md not found"
+    issues=$((issues + 1))
+  fi
+
+  # --- Summary ---
+  echo ""
+  if [ "$issues" -eq 0 ]; then
+    echo -e "${GREEN}No issues found. RadioHeader is healthy!${NC}"
+  else
+    echo -e "${YELLOW}Found $issues issue(s). Run install.sh to fix missing components.${NC}"
+  fi
+  echo ""
+}
+
+# ============================================================
+# Main — subcommand routing
+# ============================================================
+
+case "${1:-help}" in
+  init)    shift; cmd_init "$@" ;;
+  search)  shift; cmd_search "$@" ;;
+  status)  cmd_status ;;
+  doctor)  cmd_doctor ;;
+  help|--help|-h) cmd_help ;;
+  --version|-v) echo "radioheader v$VERSION" ;;
+  *)
+    err "Unknown command: $1"
+    echo "Run 'radioheader help' for usage."
+    exit 1
+    ;;
+esac

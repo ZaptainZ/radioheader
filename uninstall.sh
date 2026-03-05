@@ -123,6 +123,22 @@ if [ -d "$RADIOHEADER_DIR" ]; then
   fi
 fi
 
+# --- Step 5: Remove CLI ---
+
+if [ -f "/usr/local/bin/radioheader" ]; then
+  if [ -w "/usr/local/bin/radioheader" ]; then
+    rm "/usr/local/bin/radioheader"
+  else
+    sudo rm "/usr/local/bin/radioheader" 2>/dev/null || warn "Could not remove /usr/local/bin/radioheader (try: sudo rm /usr/local/bin/radioheader)"
+  fi
+  ok "Removed CLI from /usr/local/bin/radioheader"
+fi
+
+if [ -f "$HOME/bin/radioheader" ]; then
+  rm "$HOME/bin/radioheader"
+  ok "Removed CLI from ~/bin/radioheader"
+fi
+
 echo ""
 ok "RadioHeader uninstalled."
 echo ""

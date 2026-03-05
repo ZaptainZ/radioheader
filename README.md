@@ -71,6 +71,8 @@ The installer | 安装器会：
 - Installs 4 hooks into `~/.claude/hooks/` | 安装 4 个 hook 脚本
 - Appends RadioHeader behavioral rules to `~/.claude/CLAUDE.md` | 追加行为规则到 CLAUDE.md
 - Merges hooks into `~/.claude/settings.json` (SessionStart + PostToolUse + Stop) | 合并 hooks 配置
+- Copies project templates for `radioheader init` | 复制项目模板供 CLI 使用
+- Installs `radioheader` CLI to `/usr/local/bin/` (or `~/bin/` fallback) | 安装 CLI 工具
 - Creates timestamped backups of all modified files | 为所有修改文件创建带时间戳的备份
 
 ### Uninstall | 卸载
@@ -83,6 +85,70 @@ cd radioheader
 Removes all RadioHeader components. If you have topic files, it will ask before deleting them.
 
 > 移除所有 RadioHeader 组件。如果有经验文件，会在删除前询问。
+
+## CLI | 命令行工具
+
+RadioHeader includes a CLI for project initialization and daily management:
+
+> RadioHeader 包含一个 CLI 工具，用于项目初始化和日常管理：
+
+```bash
+radioheader init      # Initialize current project | 初始化当前项目
+radioheader search    # Search topics | 搜索经验
+radioheader status    # Show status | 显示状态
+radioheader doctor    # Health check | 健康检查
+radioheader help      # Show help | 显示帮助
+```
+
+### `radioheader init`
+
+Initialize the dynamic experience framework in your current project directory:
+
+> 在当前项目目录中初始化动态经验框架：
+
+```bash
+# Interactive mode (prompts for each value) | 交互模式
+radioheader init
+
+# Flag mode | 参数模式
+radioheader init --name "MyApp" --stack "iOS/SwiftUI"
+radioheader init --name "MyApp" --stack "Python/FastAPI" --doc-dir docs --terms "internal=external"
+```
+
+This creates the project scaffolding (`CLAUDE.md`, `.claude/rules/`, doc directory) and registers the project. Existing files are never overwritten.
+
+> 创建项目脚手架（CLAUDE.md、.claude/rules/、文档目录）并注册项目。已存在的文件不会被覆盖。
+
+### `radioheader search`
+
+Search across all topic files:
+
+> 搜索所有经验文件：
+
+```bash
+radioheader search "NavigationStack"
+radioheader search "white screen|slow launch|startup"
+```
+
+### `radioheader status`
+
+Show topic file count, entry count, registered projects, and installation health:
+
+> 显示主题文件数、条目数、注册项目数和安装状态：
+
+```bash
+radioheader status
+```
+
+### `radioheader doctor`
+
+Run comprehensive health checks — hooks, CLAUDE.md markers, topic tags, INDEX consistency, stale registry entries:
+
+> 运行全面健康检查——hooks、CLAUDE.md 标记、topic 标签、INDEX 一致性、过时注册条目：
+
+```bash
+radioheader doctor
+```
 
 ## Usage | 使用
 
@@ -122,9 +188,9 @@ See [`examples/topics/`](examples/topics/) for a full example.
 
 ### Per-Project Setup | 项目级配置
 
-When you open a project for the first time after installing RadioHeader, Claude will offer to set up the dynamic experience framework. This creates:
+Use `radioheader init` or let Claude offer to set up the dynamic experience framework when you open a project for the first time. This creates:
 
-> 安装后首次打开项目时，Claude 会提供启用动态经验框架的选项，创建以下结构：
+> 使用 `radioheader init` 或在首次打开项目时让 Claude 提供启用选项。创建以下结构：
 
 ```
 your-project/
@@ -157,6 +223,8 @@ your-project/
 | `~/.claude/hooks/radioheader-memory-sync.sh` | PostToolUse: triggers reflux on memory/ writes | memory 写入时触发回流 |
 | `~/.claude/hooks/radioheader-stop-reflux.sh` | Stop: reflux checklist reminder | 会话结束回流提醒 |
 | `~/.claude/CLAUDE.md` | RadioHeader rules between markers | 规则追加在标记之间 |
+| `~/.claude/radioheader/templates/project/` | Project init templates | 项目初始化模板 |
+| `/usr/local/bin/radioheader` (or `~/bin/`) | CLI tool | CLI 工具 |
 
 ### How Experience Flows | 经验流转
 

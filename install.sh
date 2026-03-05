@@ -58,6 +58,13 @@ if [ ! -f "$RADIOHEADER_DIR/project-registry.md" ]; then
   ok "Created project-registry.md"
 fi
 
+# --- Step 1.5: Copy project templates ---
+
+TEMPLATE_DEST="$RADIOHEADER_DIR/templates/project"
+mkdir -p "$TEMPLATE_DEST"
+cp -R "$SCRIPT_DIR/templates/project/" "$TEMPLATE_DEST/"
+ok "Installed project templates → $TEMPLATE_DEST"
+
 # --- Step 2: Install hook scripts ---
 
 mkdir -p "$HOOKS_DIR"
@@ -236,6 +243,38 @@ SETTINGS_EOF
   ok "Created settings.json with hooks"
 fi
 
+# --- Step 5: Install CLI ---
+
+CLI_INSTALLED=""
+if [ -w "/usr/local/bin" ]; then
+  cp "$SCRIPT_DIR/radioheader" "/usr/local/bin/radioheader"
+  chmod +x "/usr/local/bin/radioheader"
+  CLI_INSTALLED="/usr/local/bin/radioheader"
+  ok "Installed CLI → /usr/local/bin/radioheader"
+elif command -v sudo &>/dev/null; then
+  info "Installing CLI to /usr/local/bin (may require sudo)..."
+  if sudo cp "$SCRIPT_DIR/radioheader" "/usr/local/bin/radioheader" 2>/dev/null && sudo chmod +x "/usr/local/bin/radioheader" 2>/dev/null; then
+    CLI_INSTALLED="/usr/local/bin/radioheader"
+    ok "Installed CLI → /usr/local/bin/radioheader"
+  else
+    warn "Could not install to /usr/local/bin, trying ~/bin/ ..."
+  fi
+fi
+
+if [ -z "$CLI_INSTALLED" ]; then
+  mkdir -p "$HOME/bin"
+  cp "$SCRIPT_DIR/radioheader" "$HOME/bin/radioheader"
+  chmod +x "$HOME/bin/radioheader"
+  CLI_INSTALLED="$HOME/bin/radioheader"
+  ok "Installed CLI → ~/bin/radioheader"
+
+  # Check if ~/bin is in PATH
+  if ! echo "$PATH" | tr ':' '\n' | grep -q "$HOME/bin"; then
+    warn "~/bin is not in your PATH. Add it with:"
+    echo "  export PATH=\"\$HOME/bin:\$PATH\""
+  fi
+fi
+
 # --- Done ---
 
 echo ""
@@ -245,14 +284,21 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "What's next:"
 echo "  1. Open any project with Claude Code"
-echo "  2. You'll be asked to enable the dynamic experience framework"
+echo "  2. Run 'radioheader init' to set up the dynamic experience framework"
 echo "  3. As you work, experience flows into ~/.claude/radioheader/topics/"
 echo "  4. All projects can search and use shared experience"
+echo ""
+echo "CLI commands:"
+echo "  radioheader init      # Initialize a project"
+echo "  radioheader search    # Search topics"
+echo "  radioheader status    # Show status"
+echo "  radioheader doctor    # Health check"
 echo ""
 echo "Paths:"
 echo "  RadioHeader:  $RADIOHEADER_DIR/"
 echo "  Hooks:        $HOOKS_DIR/"
 echo "  Rules:        $CLAUDE_MD"
+echo "  CLI:          $CLI_INSTALLED"
 echo ""
 echo "Backups (if any) have a .bak.$TIMESTAMP suffix."
 echo ""
