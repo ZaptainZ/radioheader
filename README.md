@@ -1,16 +1,21 @@
 # RadioHeader
 
 **Cross-project experience sharing for Claude Code.**
+**Claude Code 跨项目经验共享框架。**
 
 RadioHeader gives Claude Code a persistent memory layer that works across all your projects. When you solve a tricky bug in Project A, that experience automatically becomes available in Project B, C, and every future project.
 
-## The Problem
+> RadioHeader 为 Claude Code 提供跨项目的持久记忆层。在项目 A 中解决的棘手 bug，其经验会自动在项目 B、C 以及所有未来项目中可用。
+
+## The Problem | 问题
 
 Claude Code's memory is isolated per project. You fix a SwiftUI NavigationStack bug in one app, then hit the exact same issue three months later in another app — and Claude starts from scratch.
 
 RadioHeader solves this by creating a shared experience hub that Claude searches before analyzing any technical problem.
 
-## How It Works
+> Claude Code 的记忆按项目隔离。你在一个 app 中修了 NavigationStack 的 bug，三个月后在另一个 app 中遇到同样问题——Claude 从零开始。RadioHeader 创建共享经验中枢，Claude 在分析技术问题前会先搜索这里。
+
+## How It Works | 工作原理
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -30,28 +35,30 @@ RadioHeader solves this by creating a shared experience hub that Claude searches
    └─────────┘ └─────────┘     └─────────┘
 ```
 
-**Three-layer memory model:**
+**Three-layer memory model | 三层记忆模型：**
 
-1. **RadioHeader** (global) — cross-project experience, shared by all projects
-2. **Project memory** (`~/.claude/projects/*/memory/`) — project-specific context
-3. **Session context** — ephemeral, within one conversation
+1. **RadioHeader** (global) — cross-project experience, shared by all projects | 跨项目经验，所有项目共享
+2. **Project memory** (`~/.claude/projects/*/memory/`) — project-specific context | 项目特定上下文
+3. **Session context** — ephemeral, within one conversation | 临时，仅在单次对话中
 
-**Behavioral rules — Search, Apply, Trace:**
+**Behavioral rules — Search, Apply, Trace | 行为规则 — 搜→用→追：**
 
-1. **Search**: When facing a technical problem, Claude searches RadioHeader first
-2. **Apply**: If relevant experience is found, Claude cites and applies it
-3. **Trace**: If more detail is needed, Claude traces back to the source project's memory
+1. **Search | 搜**: When facing a technical problem, Claude searches RadioHeader first | 遇到技术问题时先搜索 RadioHeader
+2. **Apply | 用**: If relevant experience is found, Claude cites and applies it | 找到相关经验后必须引用并应用
+3. **Trace | 追**: If more detail is needed, Claude traces back to the source project's memory | 需要更多细节时追溯到源项目
 
 This isn't optional — RadioHeader injects mandatory behavioral rules into Claude's CLAUDE.md, so the agent **must** search, apply, and trace. Finding experience but not using it is explicitly prohibited.
 
-## Installation
+> 这不是可选的——RadioHeader 在 CLAUDE.md 中注入强制性行为规则。找到经验但不使用是被明确禁止的。
 
-### Prerequisites
+## Installation | 安装
+
+### Prerequisites | 前置条件
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed (`~/.claude/` directory exists)
-- `jq` recommended for automatic settings.json merging (install: `brew install jq` / `apt install jq`)
+- `jq` recommended for automatic settings.json merging (`brew install jq` / `apt install jq`)
 
-### Install
+### Install | 安装
 
 ```bash
 git clone https://github.com/ZaptainZ/radioheader.git
@@ -59,36 +66,43 @@ cd radioheader
 ./install.sh
 ```
 
-The installer:
-- Creates `~/.claude/radioheader/` with index and registry files
-- Installs two session hooks into `~/.claude/hooks/`
-- Appends RadioHeader behavioral rules to `~/.claude/CLAUDE.md`
-- Merges hooks into `~/.claude/settings.json`
-- Creates timestamped backups of all modified files
+The installer | 安装器会：
+- Creates `~/.claude/radioheader/` with index and registry files | 创建索引和注册文件
+- Installs 4 hooks into `~/.claude/hooks/` | 安装 4 个 hook 脚本
+- Appends RadioHeader behavioral rules to `~/.claude/CLAUDE.md` | 追加行为规则到 CLAUDE.md
+- Merges hooks into `~/.claude/settings.json` (SessionStart + PostToolUse + Stop) | 合并 hooks 配置
+- Creates timestamped backups of all modified files | 为所有修改文件创建带时间戳的备份
 
-### Uninstall
+### Uninstall | 卸载
 
 ```bash
 cd radioheader
 ./uninstall.sh
 ```
 
-The uninstaller removes all RadioHeader components. If you have topic files, it will ask before deleting them.
+Removes all RadioHeader components. If you have topic files, it will ask before deleting them.
 
-## Usage
+> 移除所有 RadioHeader 组件。如果有经验文件，会在删除前询问。
 
-### Automatic (just work normally)
+## Usage | 使用
+
+### Automatic (just work normally) | 自动模式
 
 After installation, RadioHeader works automatically:
 
-1. **Session start**: A hook fires showing "RadioHeader ready (N topic files)"
-2. **New project detection**: If a project hasn't been configured, Claude asks if you want to enable the dynamic experience framework
-3. **Problem solving**: When you hit a technical issue, Claude searches RadioHeader before investigating
-4. **Experience reflux**: After completing a task series, Claude checks if new experience should flow back to RadioHeader
+> 安装后自动工作：
 
-### Writing Experience Entries
+1. **Session start | 会话开始**: A hook fires showing "RadioHeader ready (N topic files)" | 显示就绪状态
+2. **New project detection | 新项目检测**: Claude asks if you want to enable the dynamic experience framework | 询问是否启用动态经验框架
+3. **Problem solving | 问题解决**: Claude searches RadioHeader before investigating | 先搜索 RadioHeader 再分析
+4. **Memory sync | 记忆联动**: PostToolUse hook detects memory/ writes and triggers reflux checks | PostToolUse hook 检测 memory 写入并触发回流
+5. **Experience reflux | 经验回流**: After completing a task series, Claude checks if experience should flow back | 完成任务后检查是否需要回流
 
-Experience accumulates naturally as you work. Entries are written to topic files under `~/.claude/radioheader/topics/` in this format:
+### Writing Experience Entries | 编写经验条目
+
+Experience accumulates naturally as you work. Entries are written to topic files under `~/.claude/radioheader/topics/`:
+
+> 经验在工作中自然积累，写入 `~/.claude/radioheader/topics/` 下的主题文件：
 
 ```markdown
 - [source:MyApp] `Task {}` in SwiftUI `.onAppear` inherits Main Actor —
@@ -96,57 +110,64 @@ Experience accumulates naturally as you work. Entries are written to topic files
   startup delay). Fix: use `Task.detached(priority:)`
 ```
 
-**Key principles:**
+**Key principles | 关键原则：**
 
-- Keep **symptom keywords** ("white screen", "slow launch", "10s+") — users search by symptoms
-- Include **quantified data** ("20-40s" not just "slow")
-- Add **synonyms** in parentheses for search discoverability
-- Tag **source project** `[source:Name]` for traceability
-- One experience per line — concise but complete
+- Keep **symptom keywords** ("white screen", "slow launch", "10s+") — users search by symptoms | 保留症状关键词——用户按症状搜索
+- Include **quantified data** ("20-40s" not just "slow") | 包含量化数据
+- Add **synonyms** in parentheses for search discoverability | 添加同义词提高搜索命中率
+- Tag **source project** `[source:Name]` for traceability | 标注源项目用于追溯
+- One experience per line — concise but complete | 一条经验一行
 
 See [`examples/topics/`](examples/topics/) for a full example.
 
-### Per-Project Setup
+### Per-Project Setup | 项目级配置
 
 When you open a project for the first time after installing RadioHeader, Claude will offer to set up the dynamic experience framework. This creates:
+
+> 安装后首次打开项目时，Claude 会提供启用动态经验框架的选项，创建以下结构：
 
 ```
 your-project/
 ├── .claude/
-│   ├── settings.json         # Project-level hooks
+│   ├── settings.json         # Project-level hooks | 项目级 hooks
 │   ├── hooks/
 │   │   └── load-project-rules.sh
 │   └── rules/
-│       ├── memory-reflux.md  # Experience reflux rules
-│       ├── logs-writing.md   # Log writing rules
-│       └── information-lookup.md  # Search strategy
-├── CLAUDE.md                 # Project entry point
+│       ├── memory-reflux.md  # Experience reflux rules | 经验回流规则
+│       ├── logs-writing.md   # Log writing rules | 日志写入规则
+│       └── information-lookup.md  # Search strategy | 信息查找策略
+├── CLAUDE.md                 # Project entry point | 项目入口
 └── {doc-dir}/
     ├── 00_AGENT_RULES.md
     ├── 01_PROJECT_OVERVIEW.md
     └── logs/
 ```
 
-## Architecture
+## Architecture | 架构
 
-### Files Installed
+### Files Installed | 安装的文件
 
-| Path | Purpose |
-|------|---------|
-| `~/.claude/radioheader/INDEX.md` | Master index of all topic files |
-| `~/.claude/radioheader/project-registry.md` | Registry of all projects (name, stack, path) |
-| `~/.claude/radioheader/topics/*.md` | Experience files organized by technology/domain |
-| `~/.claude/hooks/radioheader-loader.sh` | Session hook: shows RadioHeader status |
-| `~/.claude/hooks/check-project-architecture.sh` | Session hook: detects unconfigured projects |
-| `~/.claude/CLAUDE.md` | RadioHeader rules appended between markers |
+| Path | Purpose | 用途 |
+|------|---------|------|
+| `~/.claude/radioheader/INDEX.md` | Master index of all topic files | 主题文件主索引 |
+| `~/.claude/radioheader/project-registry.md` | Registry of all projects (name, stack, path) | 项目注册表 |
+| `~/.claude/radioheader/topics/*.md` | Experience files by technology/domain | 按技术领域组织的经验文件 |
+| `~/.claude/hooks/radioheader-loader.sh` | SessionStart: shows RadioHeader status | 显示就绪状态 |
+| `~/.claude/hooks/check-project-architecture.sh` | SessionStart: detects unconfigured projects | 检测未配置项目 |
+| `~/.claude/hooks/radioheader-memory-sync.sh` | PostToolUse: triggers reflux on memory/ writes | memory 写入时触发回流 |
+| `~/.claude/hooks/radioheader-stop-reflux.sh` | Stop: reflux checklist reminder | 会话结束回流提醒 |
+| `~/.claude/CLAUDE.md` | RadioHeader rules between markers | 规则追加在标记之间 |
 
-### How Experience Flows
+### How Experience Flows | 经验流转
 
 ```
-You solve a bug in Project A
+You solve a bug in Project A          在项目 A 中修复 bug
         │
         ▼
 Claude records it in Project A's memory/
+        │
+        ▼
+PostToolUse hook fires → reflux check  PostToolUse hook 触发 → 回流检查
         │
         ▼
 Claude checks: Is this useful cross-project?
@@ -168,23 +189,37 @@ Cites it: "RadioHeader has experience from ProjectA: ..."
 Applies the solution (or verifies applicability first)
 ```
 
-## Lessons Learned
+## Lessons Learned | 实战经验
 
 RadioHeader was built through real-world usage across 13 projects. Key insights:
 
+> RadioHeader 在 13 个项目的实际使用中打磨而成。
+
 1. **"Searched but didn't use" is the #1 failure mode.** Early versions told Claude to search RadioHeader, but the agent would search, find results, and then completely ignore them. The fix: make the behavioral rule three mandatory steps (Search → Apply → Trace) with an explicit prohibition on finding but not using.
+
+   > **"搜到但没用"是头号失败模式。** 修复：三步强制规则（搜→用→追）+ 禁止搜到不用。
 
 2. **Symptom keywords matter more than solution keywords.** Developers search by symptoms ("white screen", "slow launch") not by solutions ("Task.detached"). Strip the symptoms and the entry becomes unfindable.
 
+   > **症状关键词比解决方案关键词更重要。** 开发者搜"白屏"不搜"Task.detached"。
+
 3. **Instructions beat knowledge.** Writing "experience is stored in RadioHeader" (informational) doesn't drive behavior. Writing "you MUST search RadioHeader first" (imperative) does. CLAUDE.md content must be behavioral instructions, not reference documentation.
+
+   > **指令胜过知识。** "这里有经验"不够，"你必须先搜"才能驱动行为。
 
 4. **Bidirectional flow is essential.** One-way aggregation (project → global) creates a stale knowledge base. The reflux cycle (project → global → project) keeps experience alive and verified.
 
-## Docs
+   > **双向流转至关重要。** 单向聚合会过时，回流循环保持鲜活。
 
-- [How It Works](docs/how-it-works.md) — Architecture and behavioral design
-- [Writing Good Entries](docs/writing-good-entries.md) — Format, keywords, and examples
-- [Lessons Learned](docs/lessons-learned.md) — What we tried, what failed, what works
+5. **PostToolUse `additionalContext` is the strongest behavioral driver.** Injecting system-level context via hook JSON output is more reliable than CLAUDE.md rules alone for triggering specific actions at the right moment.
+
+   > **PostToolUse `additionalContext` 是最强行为驱动。** 通过 hook JSON 输出注入系统级上下文，比单靠 CLAUDE.md 规则更可靠。
+
+## Docs | 文档
+
+- [How It Works | 工作原理](docs/how-it-works.md) — Architecture and behavioral design
+- [Writing Good Entries | 编写指南](docs/writing-good-entries.md) — Format, keywords, and examples
+- [Lessons Learned | 经验教训](docs/lessons-learned.md) — What we tried, what failed, what works
 
 ## License
 
