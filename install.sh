@@ -47,6 +47,7 @@ info "Installing RadioHeader..."
 # --- Step 1: Create radioheader directory ---
 
 mkdir -p "$RADIOHEADER_DIR/topics"
+mkdir -p "$RADIOHEADER_DIR/shortwave"
 
 if [ ! -f "$RADIOHEADER_DIR/INDEX.md" ]; then
   sed "s|__HOME__|$HOME|g" "$SCRIPT_DIR/templates/radioheader/INDEX.md" > "$RADIOHEADER_DIR/INDEX.md"

@@ -9,6 +9,7 @@ CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
 TOPICS_DIR="$RADIOHEADER_DIR/topics"
+SHORTWAVE_DIR="$RADIOHEADER_DIR/shortwave"
 REGISTRY="$RADIOHEADER_DIR/project-registry.md"
 INDEX="$RADIOHEADER_DIR/INDEX.md"
 
@@ -54,6 +55,7 @@ ${BOLD}COMMANDS${NC}
   search    Search RadioHeader topics
   status    Show RadioHeader status
   doctor    Run health checks
+  align     Analyze topics↔shortwave coverage and batch refine
   help      Show this help message
 
 ${BOLD}EXAMPLES${NC}
@@ -63,6 +65,9 @@ ${BOLD}EXAMPLES${NC}
   radioheader search "white screen|slow launch"
   radioheader status
   radioheader doctor
+  radioheader align
+  radioheader align --execute
+  radioheader align --refs
 
 EOF
 }
@@ -284,51 +289,78 @@ cmd_search() {
     return 1
   fi
 
-  if [ ! -d "$TOPICS_DIR" ]; then
-    err "RadioHeader topics directory not found: $TOPICS_DIR"
-    err "Is RadioHeader installed?"
-    return 1
-  fi
-
   local pattern="$1"
-  local topic_count
-  topic_count=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  local total_matches=0
 
-  if [ "$topic_count" -eq 0 ]; then
-    warn "No topic files found in $TOPICS_DIR"
-    return 0
+  # --- Shortwave results (refined, shown first) ---
+  local sw_results=""
+  local sw_count=0
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    local sw_file_count
+    sw_file_count=$(find "$SHORTWAVE_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$sw_file_count" -gt 0 ]; then
+      sw_results=$(grep -n -i -E "$pattern" "$SHORTWAVE_DIR"/*.md 2>/dev/null || true)
+      if [ -n "$sw_results" ]; then
+        sw_count=$(echo "$sw_results" | wc -l | tr -d ' ')
+      fi
+    fi
   fi
 
-  echo -e "${DIM}Searching $topic_count topic files for: ${NC}${BOLD}$pattern${NC}"
-  echo ""
+  # --- Topics results (detailed) ---
+  local topic_results=""
+  local topic_count=0
+  if [ -d "$TOPICS_DIR" ]; then
+    local topic_file_count
+    topic_file_count=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$topic_file_count" -gt 0 ]; then
+      topic_results=$(grep -n -i -E "$pattern" "$TOPICS_DIR"/*.md 2>/dev/null || true)
+      if [ -n "$topic_results" ]; then
+        topic_count=$(echo "$topic_results" | wc -l | tr -d ' ')
+      fi
+    fi
+  fi
 
-  local results
-  results=$(grep -n -i -E "$pattern" "$TOPICS_DIR"/*.md 2>/dev/null || true)
+  total_matches=$((sw_count + topic_count))
 
-  if [ -z "$results" ]; then
-    warn "No matches found."
+  if [ "$total_matches" -eq 0 ]; then
+    warn "No matches found for: $pattern"
     echo -e "${DIM}Tip: Try broader keywords or synonyms.${NC}"
     return 0
   fi
 
-  local match_count
-  match_count=$(echo "$results" | wc -l | tr -d ' ')
-  echo -e "${GREEN}Found $match_count match(es):${NC}"
+  echo -e "${DIM}Searching for: ${NC}${BOLD}$pattern${NC}"
+  echo -e "${GREEN}Found $total_matches match(es):${NC}"
   echo ""
 
-  # Colorize output: filename in cyan, line number in yellow, match highlighted
-  echo "$results" | while IFS= read -r line; do
-    local file_part="${line%%:*}"
-    local rest="${line#*:}"
-    local linenum="${rest%%:*}"
-    local content="${rest#*:}"
-    local basename
-    basename=$(basename "$file_part")
+  # Display shortwave results first (higher priority)
+  if [ -n "$sw_results" ]; then
+    echo -e "  ${BOLD}📡 Shortwave (精炼):${NC}"
+    echo "$sw_results" | while IFS= read -r line; do
+      local file_part="${line%%:*}"
+      local rest="${line#*:}"
+      local linenum="${rest%%:*}"
+      local content="${rest#*:}"
+      local bname
+      bname=$(basename "$file_part")
+      echo -e "    ${CYAN}$bname${NC}:${YELLOW}$linenum${NC}: $content"
+    done
+    echo ""
+  fi
 
-    echo -e "  ${CYAN}$basename${NC}:${YELLOW}$linenum${NC}: $content"
-  done
-
-  echo ""
+  # Display topics results
+  if [ -n "$topic_results" ]; then
+    echo -e "  ${BOLD}📂 Topics (详细):${NC}"
+    echo "$topic_results" | while IFS= read -r line; do
+      local file_part="${line%%:*}"
+      local rest="${line#*:}"
+      local linenum="${rest%%:*}"
+      local content="${rest#*:}"
+      local bname
+      bname=$(basename "$file_part")
+      echo -e "    ${CYAN}$bname${NC}:${YELLOW}$linenum${NC}: $content"
+    done
+    echo ""
+  fi
 }
 
 # ============================================================
@@ -375,6 +407,13 @@ cmd_status() {
   if [ -n "$latest_file" ]; then
     echo -e "  Latest:       $(basename "$latest_file")"
   fi
+
+  # --- Shortwave files ---
+  local sw_count=0
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    sw_count=$(find "$SHORTWAVE_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  echo -e "  Shortwave:    ${BOLD}$sw_count${NC} entries"
 
   # --- Registered projects ---
   local project_count=0
@@ -549,6 +588,41 @@ cmd_doctor() {
     issues=$((issues + 1))
   fi
 
+  # --- Shortwave files ---
+  echo ""
+  echo -e "${BOLD}Shortwave Files${NC}"
+
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    local sw_count
+    sw_count=$(find "$SHORTWAVE_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    echo -e "  ${GREEN}✓${NC} $sw_count shortwave file(s)"
+
+    if [ "$sw_count" -gt 0 ]; then
+      # Check for required YAML frontmatter fields: id, domain, tags
+      local missing_meta=0
+      for f in "$SHORTWAVE_DIR"/*.md; do
+        [ -f "$f" ] || continue
+        local bname
+        bname=$(basename "$f")
+        local has_id has_domain has_tags
+        has_id=$(grep -c '^id:' "$f" 2>/dev/null || echo "0")
+        has_domain=$(grep -c '^domain:' "$f" 2>/dev/null || echo "0")
+        has_tags=$(grep -c '^tags:' "$f" 2>/dev/null || echo "0")
+        if [ "$has_id" -eq 0 ] || [ "$has_domain" -eq 0 ] || [ "$has_tags" -eq 0 ]; then
+          echo -e "  ${YELLOW}!${NC} Missing metadata in $bname (need: id, domain, tags)"
+          missing_meta=$((missing_meta + 1))
+          issues=$((issues + 1))
+        fi
+      done
+      if [ "$missing_meta" -eq 0 ]; then
+        echo -e "  ${GREEN}✓${NC} All shortwave files have required metadata"
+      fi
+    fi
+  else
+    echo -e "  ${YELLOW}!${NC} Shortwave directory not found (run install.sh to create)"
+    issues=$((issues + 1))
+  fi
+
   # --- INDEX.md consistency ---
   echo ""
   echo -e "${BOLD}INDEX.md Consistency${NC}"
@@ -629,6 +703,420 @@ cmd_doctor() {
 }
 
 # ============================================================
+# align
+# ============================================================
+
+cmd_align() {
+  local mode="report"
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --execute) mode="execute"; shift ;;
+      --refs)    mode="refs"; shift ;;
+      --help|-h)
+        cat <<EOF
+${BOLD}radioheader align${NC} — Analyze topics↔shortwave coverage and batch refine
+
+${BOLD}MODES${NC}
+  (default)    Show coverage report (analysis only, no changes)
+  --execute    Output additionalContext JSON for batch refinement
+  --refs       Validate and fix shortwave refs links
+
+EOF
+        return 0
+        ;;
+      *)
+        err "Unknown flag: $1"
+        return 1
+        ;;
+    esac
+  done
+
+  # Pre-checks
+  if [ ! -d "$TOPICS_DIR" ]; then
+    err "Topics directory not found: $TOPICS_DIR"
+    return 1
+  fi
+
+  case "$mode" in
+    report)  _align_report ;;
+    execute) _align_execute ;;
+    refs)    _align_refs ;;
+  esac
+}
+
+# --- align: report mode ---
+_align_report() {
+  local topic_files=0
+  local total_entries=0
+  local sw_files=0
+  local total_sw=0
+  local report_lines=""
+
+  # Count topic files and entries
+  for f in "$TOPICS_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    topic_files=$((topic_files + 1))
+    local bname
+    bname=$(basename "$f")
+    local count
+    count=$(grep -c '^\- \[' "$f" 2>/dev/null || echo "0")
+    total_entries=$((total_entries + count))
+  done
+
+  # Count shortwave files and collect refs → topic mapping
+  # Store as lines "topic_basename:count" in a temp file (bash 3 compat)
+  local sw_map_file
+  sw_map_file=$(mktemp)
+  trap "rm -f '$sw_map_file'" RETURN
+
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    for f in "$SHORTWAVE_DIR"/*.md; do
+      [ -f "$f" ] || continue
+      sw_files=$((sw_files + 1))
+      total_sw=$((total_sw + 1))
+      # Extract refs field
+      local refs_line
+      refs_line=$(grep '^refs:' "$f" 2>/dev/null || true)
+      if [ -n "$refs_line" ]; then
+        local ref_path
+        ref_path=$(echo "$refs_line" | sed 's/^refs:[[:space:]]*//' | xargs)
+        local ref_base
+        ref_base=$(basename "$ref_path")
+        echo "$ref_base" >> "$sw_map_file"
+      fi
+    done
+  fi
+
+  # Coverage percentage
+  local coverage="0.0"
+  if [ "$total_entries" -gt 0 ]; then
+    coverage=$(awk "BEGIN { printf \"%.1f\", ($total_sw / $total_entries) * 100 }")
+  fi
+
+  echo ""
+  echo -e "${BOLD}RadioHeader Alignment Report${NC}"
+  echo ""
+  echo -e "  Topics:     ${BOLD}$topic_files${NC} files, ${BOLD}$total_entries${NC} entries"
+  echo -e "  Shortwave:  ${BOLD}$sw_files${NC} files"
+  echo -e "  Coverage:   ${BOLD}${coverage}%${NC} ($total_sw/$total_entries)"
+  echo ""
+
+  # Per-topic breakdown
+  echo -e "${BOLD}Per-topic breakdown:${NC}"
+  for f in "$TOPICS_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    local bname
+    bname=$(basename "$f")
+    local count
+    count=$(grep -c '^\- \[' "$f" 2>/dev/null || echo "0")
+    local sw_count
+    sw_count=$(grep -c "^${bname}$" "$sw_map_file" 2>/dev/null || echo "0")
+    local uncovered=$((count - sw_count))
+    if [ "$uncovered" -lt 0 ]; then uncovered=0; fi
+    local pct="0.0"
+    if [ "$count" -gt 0 ]; then
+      pct=$(awk "BEGIN { printf \"%.1f\", ($sw_count / $count) * 100 }")
+    fi
+    local indicator=""
+    if [ "$uncovered" -gt 0 ]; then
+      indicator="${YELLOW} ← $uncovered uncovered${NC}"
+    else
+      indicator="${GREEN} ✓${NC}"
+    fi
+    printf "  %-30s %2d/%-3d covered (%5s%%)%b\n" "$bname" "$sw_count" "$count" "$pct" "$indicator"
+  done
+
+  # Refs validation
+  echo ""
+  echo -e "${BOLD}Refs status:${NC}"
+  local refs_total=0
+  local refs_valid=0
+  local refs_broken=0
+  local refs_missing=0
+
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    for f in "$SHORTWAVE_DIR"/*.md; do
+      [ -f "$f" ] || continue
+      local refs_line
+      refs_line=$(grep '^refs:' "$f" 2>/dev/null || true)
+      if [ -z "$refs_line" ]; then
+        refs_missing=$((refs_missing + 1))
+        continue
+      fi
+      refs_total=$((refs_total + 1))
+      local ref_path
+      ref_path=$(echo "$refs_line" | sed 's/^refs:[[:space:]]*//' | xargs)
+      # Resolve relative to radioheader dir
+      if [ -f "$RADIOHEADER_DIR/$ref_path" ]; then
+        refs_valid=$((refs_valid + 1))
+      else
+        refs_broken=$((refs_broken + 1))
+      fi
+    done
+  fi
+
+  if [ "$refs_broken" -eq 0 ] && [ "$refs_missing" -eq 0 ]; then
+    echo -e "  ${GREEN}✓${NC} $refs_valid/$refs_total shortwave refs are valid"
+  else
+    if [ "$refs_broken" -gt 0 ]; then
+      echo -e "  ${RED}✗${NC} $refs_broken broken ref(s)"
+    fi
+    if [ "$refs_missing" -gt 0 ]; then
+      echo -e "  ${YELLOW}!${NC} $refs_missing shortwave file(s) without refs"
+    fi
+    echo -e "  ${GREEN}✓${NC} $refs_valid valid ref(s)"
+  fi
+
+  echo ""
+  echo -e "${DIM}Run 'radioheader align --execute' to batch refine uncovered entries.${NC}"
+  echo -e "${DIM}Run 'radioheader align --refs' to fix broken refs.${NC}"
+  echo ""
+}
+
+# --- align: execute mode ---
+_align_execute() {
+  # Find next available shortwave ID number
+  local max_id=0
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    for f in "$SHORTWAVE_DIR"/*.md; do
+      [ -f "$f" ] || continue
+      local bname
+      bname=$(basename "$f" .md)
+      # Extract trailing number: sw-ios-0001 → 0001 → 1
+      local num
+      num=$(echo "$bname" | grep -oE '[0-9]+$' || echo "0")
+      num=$((10#$num))  # remove leading zeros
+      if [ "$num" -gt "$max_id" ]; then
+        max_id=$num
+      fi
+    done
+  fi
+  local next_id=$((max_id + 1))
+
+  # Build context string
+  local context=""
+  context+="📡 短波批量对齐指令\n\n"
+
+  # Coverage summary
+  local total_entries=0
+  local total_sw=0
+  for f in "$TOPICS_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    local count
+    count=$(grep -c '^\- \[' "$f" 2>/dev/null || echo "0")
+    total_entries=$((total_entries + count))
+  done
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    total_sw=$(find "$SHORTWAVE_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  context+="## 覆盖率统计\n"
+  context+="- Topics 条目总数: $total_entries\n"
+  context+="- Shortwave 条目总数: $total_sw\n"
+  context+="- 下一个可用编号: $(printf '%04d' $next_id)\n\n"
+
+  # Existing shortwave list
+  context+="## 已有 Shortwave 条目\n"
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    for f in "$SHORTWAVE_DIR"/*.md; do
+      [ -f "$f" ] || continue
+      local bname
+      bname=$(basename "$f")
+      local title
+      title=$(grep '^###' "$f" 2>/dev/null | head -1 | sed 's/^###[[:space:]]*//')
+      local refs_line
+      refs_line=$(grep '^refs:' "$f" 2>/dev/null | sed 's/^refs:[[:space:]]*//' || true)
+      context+="- $bname: $title (refs: $refs_line)\n"
+    done
+  fi
+  context+="\n"
+
+  # Each topic file — full entries
+  context+="## Topic 条目原文（逐文件）\n\n"
+  for f in "$TOPICS_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    local bname
+    bname=$(basename "$f")
+    local count
+    count=$(grep -c '^\- \[' "$f" 2>/dev/null || echo "0")
+    context+="### $bname ($count 条)\n"
+    # Extract all entry lines
+    local entries
+    entries=$(grep '^\- \[' "$f" 2>/dev/null || true)
+    if [ -n "$entries" ]; then
+      context+="$entries\n"
+    else
+      context+="(无条目)\n"
+    fi
+    context+="\n"
+  done
+
+  # Refinement rules
+  context+="## 精炼规则（5+1 步）\n"
+  context+="1. **去项目化**：移除 [来源:xxx] 标签、项目名、文件路径、专有类名\n"
+  context+="2. **保留症状**：保留症状关键词（白屏、崩溃、慢）+ 量化数据（10s+、20-40s）\n"
+  context+="3. **抽象化**：提取通用模式，用泛化描述替代项目特定描述\n"
+  context+="4. **补充标签**：tags 包含中英文同义词、症状词、技术关键词\n"
+  context+="5. **关联 refs**：refs 字段指向源 topic 文件路径（如 topics/ios-swiftui.md）\n"
+  context+="+1. **合并相关条目**：语义相近的多条 topic 条目合并为一个 shortwave 条目\n\n"
+
+  # Naming convention
+  context+="## 命名规则\n"
+  context+="- 格式: sw-{domain}-{NNNN}.md\n"
+  context+="- domain 参考: ios, backend, claudecode, network, product, rust, ai\n"
+  context+="- 编号从 $(printf '%04d' $next_id) 开始递增\n\n"
+
+  # Format spec reference
+  context+="## 格式规范\n"
+  context+="每个 shortwave 文件包含:\n"
+  context+="- YAML frontmatter: id, domain, tags, refs\n"
+  context+="- 标题行: ### 一句话概括\n"
+  context+="- 正文键值对: symptoms, context, cause, fix, verified (可选), case (可选)\n\n"
+
+  # Instruction
+  context+="## 执行指令\n"
+  context+="对比上方「已有 Shortwave 条目」和「Topic 条目原文」，判断哪些 topic 条目尚未被覆盖。\n"
+  context+="逐个 topic 文件处理，为每组语义相关的未覆盖条目创建一个 shortwave 文件。\n"
+  context+="写入路径: $SHORTWAVE_DIR/\n"
+  context+="完成后运行 radioheader align 确认覆盖率提升。"
+
+  # Output as hookSpecificOutput JSON
+  # Escape the context for JSON
+  local escaped_context
+  escaped_context=$(printf '%s' "$context" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read()))')
+
+  cat <<EOF
+{
+  "hookSpecificOutput": {
+    "hookEventName": "PostToolUse",
+    "additionalContext": $escaped_context
+  }
+}
+EOF
+}
+
+# --- align: refs mode ---
+_align_refs() {
+  echo ""
+  echo -e "${BOLD}RadioHeader Refs Check${NC}"
+  echo ""
+
+  if [ ! -d "$SHORTWAVE_DIR" ]; then
+    warn "Shortwave directory not found: $SHORTWAVE_DIR"
+    return 1
+  fi
+
+  local total=0
+  local valid=0
+  local broken=0
+  local missing=0
+  local fixed=0
+
+  for f in "$SHORTWAVE_DIR"/*.md; do
+    [ -f "$f" ] || continue
+    total=$((total + 1))
+    local bname
+    bname=$(basename "$f")
+    local refs_line
+    refs_line=$(grep '^refs:' "$f" 2>/dev/null || true)
+
+    if [ -z "$refs_line" ]; then
+      # No refs — try to auto-fill from domain
+      missing=$((missing + 1))
+      local domain_line
+      domain_line=$(grep '^domain:' "$f" 2>/dev/null || true)
+      if [ -n "$domain_line" ]; then
+        local domain_val
+        domain_val=$(echo "$domain_line" | sed 's/^domain:[[:space:]]*//' | xargs)
+        # Try to match domain keywords against topic filenames
+        local matched_topic=""
+        local match_count=0
+        # Extract first keyword from domain (before comma)
+        local first_keyword
+        first_keyword=$(echo "$domain_val" | cut -d',' -f1 | xargs | tr '[:upper:]' '[:lower:]')
+        for tf in "$TOPICS_DIR"/*.md; do
+          [ -f "$tf" ] || continue
+          local tf_lower
+          tf_lower=$(basename "$tf" | tr '[:upper:]' '[:lower:]')
+          if echo "$tf_lower" | grep -qi "$first_keyword" 2>/dev/null; then
+            matched_topic=$(basename "$tf")
+            match_count=$((match_count + 1))
+          fi
+        done
+
+        if [ "$match_count" -eq 1 ]; then
+          # Unique match — auto-fix
+          # Insert refs line after the last frontmatter field (before ---)
+          # Find the closing --- line number (second occurrence)
+          local close_line
+          close_line=$(awk '/^---$/{n++; if(n==2){print NR; exit}}' "$f")
+          if [ -n "$close_line" ]; then
+            sedi "${close_line}i\\
+refs: topics/${matched_topic}" "$f"
+            echo -e "  ${GREEN}✓ Fixed${NC} $bname → refs: topics/$matched_topic"
+            fixed=$((fixed + 1))
+          else
+            echo -e "  ${YELLOW}!${NC} $bname: no refs, domain='$domain_val', matched '$matched_topic' but couldn't insert (no closing ---)"
+          fi
+        elif [ "$match_count" -gt 1 ]; then
+          echo -e "  ${YELLOW}!${NC} $bname: no refs, domain='$domain_val' matches multiple topics — manual fix needed"
+        else
+          echo -e "  ${YELLOW}!${NC} $bname: no refs, domain='$domain_val' matches no topic file"
+        fi
+      else
+        echo -e "  ${YELLOW}!${NC} $bname: no refs and no domain — cannot auto-fix"
+      fi
+      continue
+    fi
+
+    # Has refs — validate
+    local ref_path
+    ref_path=$(echo "$refs_line" | sed 's/^refs:[[:space:]]*//' | xargs)
+    if [ -f "$RADIOHEADER_DIR/$ref_path" ]; then
+      valid=$((valid + 1))
+      echo -e "  ${GREEN}✓${NC} $bname → $ref_path"
+    else
+      broken=$((broken + 1))
+      # Try to fix: search for similar filename in topics/
+      local ref_base
+      ref_base=$(basename "$ref_path")
+      local found_match=""
+      for tf in "$TOPICS_DIR"/*.md; do
+        [ -f "$tf" ] || continue
+        if [ "$(basename "$tf")" = "$ref_base" ]; then
+          found_match="topics/$ref_base"
+          break
+        fi
+      done
+
+      if [ -n "$found_match" ] && [ "$found_match" != "$ref_path" ]; then
+        sedi "s|^refs:.*|refs: $found_match|" "$f"
+        echo -e "  ${GREEN}✓ Fixed${NC} $bname: $ref_path → $found_match"
+        fixed=$((fixed + 1))
+      else
+        echo -e "  ${RED}✗${NC} $bname → $ref_path (file not found)"
+      fi
+    fi
+  done
+
+  echo ""
+  echo -e "${BOLD}Summary:${NC}"
+  echo -e "  Total:   $total"
+  echo -e "  Valid:   ${GREEN}$valid${NC}"
+  if [ "$broken" -gt 0 ]; then
+    echo -e "  Broken:  ${RED}$broken${NC}"
+  fi
+  if [ "$missing" -gt 0 ]; then
+    echo -e "  Missing: ${YELLOW}$missing${NC}"
+  fi
+  if [ "$fixed" -gt 0 ]; then
+    echo -e "  Fixed:   ${GREEN}$fixed${NC}"
+  fi
+  echo ""
+}
+
+# ============================================================
 # Main — subcommand routing
 # ============================================================
 
@@ -637,6 +1125,7 @@ case "${1:-help}" in
   search)  shift; cmd_search "$@" ;;
   status)  cmd_status ;;
   doctor)  cmd_doctor ;;
+  align)   shift; cmd_align "$@" ;;
   help|--help|-h) cmd_help ;;
   --version|-v) echo "radioheader v$VERSION" ;;
   *)

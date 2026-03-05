@@ -20,11 +20,12 @@ RadioHeader solves this by creating a shared experience hub that Claude searches
 ```
 ┌─────────────────────────────────────────────────┐
 │                  RadioHeader                     │
-│          ~/.claude/radioheader/topics/            │
 │                                                  │
-│  ios-swiftui.md  ·  rust-systems.md  ·  ...     │
-│  [source:AppA] NavigationStack nested bug...     │
-│  [source:AppB] Swift concurrency pitfall...      │
+│  shortwave/  (refined, project-agnostic)         │
+│    sw-ios-0001.md · sw-rust-0001.md · ...        │
+│                                                  │
+│  topics/  (detailed, with [source:] tags)        │
+│    ios-swiftui.md · rust-systems.md · ...        │
 └────────────────────┬────────────────────────────┘
                      │
         ┌────────────┼────────────────┐
@@ -97,6 +98,7 @@ radioheader init      # Initialize current project | 初始化当前项目
 radioheader search    # Search topics | 搜索经验
 radioheader status    # Show status | 显示状态
 radioheader doctor    # Health check | 健康检查
+radioheader align     # Topics↔shortwave coverage | 覆盖率分析与批量精炼
 radioheader help      # Show help | 显示帮助
 ```
 
@@ -150,6 +152,27 @@ Run comprehensive health checks — hooks, CLAUDE.md markers, topic tags, INDEX 
 radioheader doctor
 ```
 
+### `radioheader align`
+
+Analyze coverage between topics and shortwave, then batch refine uncovered entries:
+
+> 分析 topics 与 shortwave 的覆盖率，批量精炼未覆盖的条目：
+
+```bash
+# Coverage report (analysis only) | 覆盖率报告（仅分析）
+radioheader align
+
+# Output batch refinement instructions as additionalContext JSON | 输出批量精炼指令
+radioheader align --execute
+
+# Validate and fix shortwave refs links | 校验并修复 refs 链接
+radioheader align --refs
+```
+
+**`--execute` mode** outputs a structured `additionalContext` JSON that Claude reads in-session to batch-create shortwave entries for all uncovered topic entries. It includes all topic entries, existing shortwave list, refinement rules, and naming conventions.
+
+> **`--execute` 模式**输出结构化 JSON，Claude 在会话中读取后批量创建 shortwave 条目。包含所有 topic 条目、已有 shortwave 列表、精炼规则和命名规范。
+
 ## Usage | 使用
 
 ### Automatic (just work normally) | 自动模式
@@ -163,6 +186,22 @@ After installation, RadioHeader works automatically:
 3. **Problem solving | 问题解决**: Claude searches RadioHeader before investigating | 先搜索 RadioHeader 再分析
 4. **Memory sync | 记忆联动**: PostToolUse hook detects memory/ writes and triggers reflux checks | PostToolUse hook 检测 memory 写入并触发回流
 5. **Experience reflux | 经验回流**: After completing a task series, Claude checks if experience should flow back | 完成任务后检查是否需要回流
+6. **Shortwave refinement | 短波精炼**: When topics/ is updated, a hook triggers Claude to distill entries into project-agnostic shortwave entries in `shortwave/` | 更新 topics/ 时自动触发精炼为项目无关的短波条目
+
+### Shortwave (Knowledge Distillation) | 知识短波
+
+Shortwave is a refined layer on top of topics. Each shortwave entry strips project-specific details and abstracts the experience into a universal, searchable knowledge unit.
+
+> 短波是 topics 之上的精炼层。每条短波去除项目细节，抽象为通用可搜索的知识单元。
+
+- **Automatic**: PostToolUse hook triggers refinement when topics/ is updated | 自动触发
+- **Searchable**: `radioheader search` shows shortwave results first | 搜索时短波优先显示
+- **Project-agnostic**: No project names, paths, or specific class names | 不含项目名、路径、专有类名
+- **Format**: YAML frontmatter (id, domain, tags) + key-value body | YAML 元数据 + 键值对正文
+
+See [`docs/shortwave-spec.md`](docs/shortwave-spec.md) for the full specification.
+
+> 详见 [`docs/shortwave-spec.md`](docs/shortwave-spec.md)。
 
 ### Writing Experience Entries | 编写经验条目
 
@@ -218,6 +257,7 @@ your-project/
 | `~/.claude/radioheader/INDEX.md` | Master index of all topic files | 主题文件主索引 |
 | `~/.claude/radioheader/project-registry.md` | Registry of all projects (name, stack, path) | 项目注册表 |
 | `~/.claude/radioheader/topics/*.md` | Experience files by technology/domain | 按技术领域组织的经验文件 |
+| `~/.claude/radioheader/shortwave/*.md` | Refined, project-agnostic knowledge entries | 精炼的项目无关知识条目 |
 | `~/.claude/hooks/radioheader-loader.sh` | SessionStart: shows RadioHeader status | 显示就绪状态 |
 | `~/.claude/hooks/check-project-architecture.sh` | SessionStart: detects unconfigured projects | 检测未配置项目 |
 | `~/.claude/hooks/radioheader-memory-sync.sh` | PostToolUse: triggers reflux on memory/ writes | memory 写入时触发回流 |
@@ -245,10 +285,17 @@ Writes to ~/.claude/radioheader/topics/{topic}.md
   with [source:ProjectA] tag
         │
         ▼
+PostToolUse hook fires → shortwave refinement trigger
+        │
+        ▼
+Claude distills → writes to shortwave/sw-{domain}-{N}.md
+  (project-agnostic, searchable)
+        │
+        ▼
 Later, in Project B, you hit a similar issue
         │
         ▼
-Claude searches RadioHeader → finds the entry
+Claude searches RadioHeader → shortwave first, then topics
         │
         ▼
 Cites it: "RadioHeader has experience from ProjectA: ..."
@@ -286,6 +333,7 @@ RadioHeader was built through real-world usage across 13 projects. Key insights:
 ## Docs | 文档
 
 - [How It Works | 工作原理](docs/how-it-works.md) — Architecture and behavioral design
+- [Shortwave Spec | 短波规范](docs/shortwave-spec.md) — Shortwave format, refinement rules, pseudonymization
 - [Writing Good Entries | 编写指南](docs/writing-good-entries.md) — Format, keywords, and examples
 - [Lessons Learned | 经验教训](docs/lessons-learned.md) — What we tried, what failed, what works
 

@@ -29,9 +29,11 @@ Cross-project experience is stored in `__HOME__/.claude/radioheader/`, shared by
 
 **Step 1: Search**. When facing a technical problem, MUST search RadioHeader first:
 ```
+Grep pattern="keyword1|keyword2|keyword3" path="__HOME__/.claude/radioheader/shortwave/"
 Grep pattern="keyword1|keyword2|keyword3" path="__HOME__/.claude/radioheader/topics/"
 ```
 Use multiple synonymous keywords to increase hit rate (e.g. "white screen|slow launch|loading|startup").
+**Shortwave entries take priority** — they are refined, project-agnostic knowledge. Use topics/ for additional detail when shortwave alone isn't enough.
 
 **Step 2: Apply**. If relevant experience is found, MUST explicitly cite it in your response:
 - Tell the user: "RadioHeader has relevant experience from {source project}: {summary}"
