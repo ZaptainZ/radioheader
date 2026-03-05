@@ -1,0 +1,11 @@
+# CLAUDE.md — __PROJECT_NAME__
+
+## Project Info
+- Tech stack: __TECH_STACK__
+- Terminology: __TERMINOLOGY__
+
+## Document Index (consult as needed, don't read everything)
+| Document | When Needed |
+|----------|------------|
+| `__DOC_DIR__/00_AGENT_RULES.md` | Unsure about operation guidelines |
+| `__DOC_DIR__/01_PROJECT_OVERVIEW.md` | Unfamiliar with project structure |
