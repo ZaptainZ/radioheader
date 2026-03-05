@@ -55,19 +55,14 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 ## 快速开始
 
 ```bash
-# 1. 克隆
 git clone https://github.com/ZaptainZ/radioheader.git
 cd radioheader
-
-# 2. 安装
 ./install.sh
-
-# 3. 初始化项目（在你的项目目录中）
-cd ~/your-project
-radioheader init --name "MyApp" --stack "iOS/SwiftUI"
 ```
 
-搞定。下次启动 Claude Code 时 RadioHeader 就会自动工作。
+搞定。启动 Claude Code 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。
+
+可选：在某个项目中运行 `radioheader init` 可添加项目级脚手架（回流规则、日志目录、文档模板）。这不是必需的——RadioHeader 无需此步即可全局工作。
 
 ## 工作原理
 

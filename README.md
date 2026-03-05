@@ -55,19 +55,14 @@ Claude: RadioHeader has experience from ProjectA:
 ## Quick Start
 
 ```bash
-# 1. Clone
 git clone https://github.com/ZaptainZ/radioheader.git
 cd radioheader
-
-# 2. Install
 ./install.sh
-
-# 3. Initialize a project (in your project directory)
-cd ~/your-project
-radioheader init --name "MyApp" --stack "iOS/SwiftUI"
 ```
 
-That's it. RadioHeader works automatically from the next Claude Code session.
+That's it. Start Claude Code in any project and RadioHeader is active — hooks fire, rules are loaded, experience is searchable.
+
+Optionally, run `radioheader init` inside a project to add per-project scaffolding (memory reflux rules, log directory, doc templates). This is not required — RadioHeader works globally without it.
 
 ## How It Works
 
