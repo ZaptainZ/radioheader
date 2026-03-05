@@ -8,7 +8,7 @@ Shortwave is RadioHeader's distilled experience layer. Each shortwave entry is a
 
 ```yaml
 ---
-id: sw-{domain-abbrev}-{number}
+id: sw-{domain-abbrev}-{slug}
 domain: comma-separated, no limit (e.g. iOS, SwiftUI, Concurrency)
 tags: symptom keywords | tech terms | synonyms (Chinese + English, redundant with body for search)
 refs: source file(s) in topics/ (optional, loss doesn't affect functionality)
@@ -51,7 +51,7 @@ Case content uses pseudonymized details (see Pseudonymization Rules below).
 
 ```markdown
 ---
-id: sw-ios-0003
+id: sw-ios-task-inherits-mainactor
 domain: iOS, SwiftUI, Concurrency
 tags: white screen | slow launch | startup delay | 白屏 | 启动慢 | 加载卡住 | MainActor | Task | onAppear
 refs: ios-swiftui.md
@@ -127,17 +127,21 @@ When creating case sections, apply these transformations:
 ## File Naming | 文件命名
 
 ```
-sw-{domain-abbrev}-{4-digit-number}.md
+sw-{domain-abbrev}-{slug}.md
 ```
 
+Slug rules: extract 3-5 key English words from the `###` title, lowercase, hyphen-joined.
+
+> slug 规则：从 `###` 标题提取 3-5 个关键英文单词，小写连字符连接。
+
 Examples:
-- `sw-ios-0001.md`
-- `sw-rust-0001.md`
-- `sw-claude-code-0001.md`
+- `sw-ios-task-inherits-mainactor.md`
+- `sw-rust-json-ffi-high-freq.md`
+- `sw-claudecode-posttooluse-additionalcontext.md`
 
-Domain abbreviation should be the primary/most specific domain. Number is sequential within that domain.
+Domain abbreviation should be the primary/most specific domain.
 
-> domain 缩写取最主要/最具体的领域。编号在该领域内递增。
+> domain 缩写取最主要/最具体的领域。
 
 ## Directory | 目录
 

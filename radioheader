@@ -877,24 +877,6 @@ _align_report() {
 
 # --- align: execute mode ---
 _align_execute() {
-  # Find next available shortwave ID number
-  local max_id=0
-  if [ -d "$SHORTWAVE_DIR" ]; then
-    for f in "$SHORTWAVE_DIR"/*.md; do
-      [ -f "$f" ] || continue
-      local bname
-      bname=$(basename "$f" .md)
-      # Extract trailing number: sw-ios-0001 → 0001 → 1
-      local num
-      num=$(echo "$bname" | grep -oE '[0-9]+$' || echo "0")
-      num=$((10#$num))  # remove leading zeros
-      if [ "$num" -gt "$max_id" ]; then
-        max_id=$num
-      fi
-    done
-  fi
-  local next_id=$((max_id + 1))
-
   # Build context string
   local context=""
   context+="📡 短波批量对齐指令\n\n"
@@ -914,7 +896,7 @@ _align_execute() {
   context+="## 覆盖率统计\n"
   context+="- Topics 条目总数: $total_entries\n"
   context+="- Shortwave 条目总数: $total_sw\n"
-  context+="- 下一个可用编号: $(printf '%04d' $next_id)\n\n"
+  context+="\n"
 
   # Existing shortwave list
   context+="## 已有 Shortwave 条目\n"
@@ -963,9 +945,19 @@ _align_execute() {
 
   # Naming convention
   context+="## 命名规则\n"
-  context+="- 格式: sw-{domain}-{NNNN}.md\n"
+  context+="- 格式: sw-{domain}-{slug}.md\n"
+  context+="- slug = 从 ### 标题提取 3-5 个英文关键词，小写连字符连接\n"
   context+="- domain 参考: ios, backend, claudecode, network, product, rust, ai\n"
-  context+="- 编号从 $(printf '%04d' $next_id) 开始递增\n\n"
+  context+="- 示例: sw-ios-task-inherits-mainactor.md, sw-rust-json-ffi-high-freq.md\n"
+  # List existing slugs for reference
+  context+="- 已有 slug 列表:\n"
+  if [ -d "$SHORTWAVE_DIR" ]; then
+    for f in "$SHORTWAVE_DIR"/*.md; do
+      [ -f "$f" ] || continue
+      context+="  - $(basename "$f" .md)\n"
+    done
+  fi
+  context+="\n"
 
   # Format spec reference
   context+="## 格式规范\n"
