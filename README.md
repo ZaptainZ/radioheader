@@ -82,6 +82,16 @@ When you solve a bug, Claude records it in the project's memory. A PostToolUse h
 
 Later, in a different project, Claude hits a similar issue. The **Search → Apply → Trace** rule kicks in: search RadioHeader first, cite and apply what's found, trace back to the source project if more detail is needed.
 
+## Tips
+
+**Manually trigger reflux.** Hooks handle most reflux automatically, but you can also tell Claude in plain language at any time:
+
+- *"Sync project info"* — Claude updates the project overview doc and checks for global reflux
+- *"Update memory"* — Claude reviews what was learned and writes to memory/topics
+- *"Write a log for today's work"* — Claude creates a task log in the logs directory
+
+This is useful after a long session, when you finish a feature, or whenever you feel recent work should be recorded before the session ends.
+
 ## CLI
 
 | Command | Description |
