@@ -129,6 +129,7 @@ radioheader init --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
 | 文档 | 内容 |
 |------|------|
 | [工作原理](docs/how-it-works.md) | 架构和行为设计 |
+| [质量标准](docs/quality-standards.md) | 评分规则和审计清单 |
 | [短波规范](docs/shortwave-spec.md) | Shortwave 格式和精炼规则 |
 | [编写指南](docs/writing-good-entries.md) | 格式、关键词和示例 |
 | [经验教训](docs/lessons-learned.md) | 试过什么、什么失败了、什么有效 |

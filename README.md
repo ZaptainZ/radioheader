@@ -129,6 +129,7 @@ See [docs/lessons-learned.md](docs/lessons-learned.md) for the full list.
 | Document | Content |
 |----------|---------|
 | [How It Works](docs/how-it-works.md) | Architecture and behavioral design |
+| [Quality Standards](docs/quality-standards.md) | Scoring rubric and audit checklist |
 | [Shortwave Spec](docs/shortwave-spec.md) | Shortwave format, refinement rules |
 | [Writing Good Entries](docs/writing-good-entries.md) | Format, keywords, and examples |
 | [Lessons Learned](docs/lessons-learned.md) | What we tried, what failed, what works |
