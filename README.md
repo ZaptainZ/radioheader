@@ -52,6 +52,8 @@ Claude: RadioHeader has experience from ProjectA:
 
 **Knowledge Distillation (Shortwave)** — Topic entries contain project-specific details (`[source:MyApp]`). Shortwave strips those details into universal, project-agnostic knowledge units — searchable across any tech stack.
 
+**Community Sharing** — Opt-in community shortwave library. Your local experience stays local; when you choose to publish, entries pass three gates (quality score ≥6/8, privacy scan, dedup check) before reaching the shared pool. Votes are collected automatically and aggregated weekly to surface the best entries.
+
 ## Quick Start
 
 ```bash
@@ -82,6 +84,24 @@ When you solve a bug, Claude records it in the project's memory. A PostToolUse h
 
 Later, in a different project, Claude hits a similar issue. The **Search → Apply → Trace** rule kicks in: search RadioHeader first, cite and apply what's found, trace back to the source project if more detail is needed.
 
+### Community Sharing
+
+When community is enabled (`radioheader community on`), search results include entries from the shared pool alongside your local ones:
+
+```
+📡 Shortwave (local)     — your own refined experience (highest priority)
+🌐 Community (shared)    — entries from other users, with quality scores
+📂 Topics (detailed)     — your raw topic entries
+```
+
+The quality lifecycle follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigmergy) model — like ant pheromone trails:
+- New entries get a 30-day exposure period
+- Usage triggers automatic voting (LLM judges causal contribution)
+- Votes aggregate weekly via GitHub Actions into scores
+- High-score entries get `verified`; low-score entries decay and archive
+
+Publishing goes through three gates: quality (≥6/8), privacy scan (no paths/keys/source tags), and dedup check.
+
 ## Tips
 
 **Manually trigger reflux.** Hooks handle most reflux automatically, but you can also tell Claude in plain language at any time:
@@ -97,12 +117,16 @@ This is useful after a long session, when you finish a feature, or whenever you 
 | Command | Description |
 |---------|-------------|
 | `radioheader init` | Initialize the experience framework in your project |
-| `radioheader search <query>` | Search across all topics and shortwave |
-| `radioheader status` | Show topic count, entry count, registered projects |
+| `radioheader search <query>` | Search across all topics, shortwave, and community |
+| `radioheader status` | Show topic count, entry count, community status |
 | `radioheader doctor` | Run health checks on hooks, rules, and registry |
 | `radioheader align` | Analyze topics↔shortwave coverage |
 | `radioheader align --execute` | Output batch refinement instructions for Claude |
 | `radioheader align --refs` | Validate and fix shortwave reference links |
+| `radioheader community on\|off\|status` | Toggle community sharing |
+| `radioheader sync` | Pull latest community library + push votes/entries |
+| `radioheader publish <file>` | Publish a shortwave to community (3-gate check) |
+| `radioheader publish --auto-detect` | Scan all local shortwave for publishable entries |
 
 ```bash
 # Search by symptoms, not solutions
@@ -110,6 +134,10 @@ radioheader search "white screen|slow launch|startup"
 
 # Initialize a new project with flags
 radioheader init --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
+
+# Enable community and sync
+radioheader community on
+radioheader sync
 ```
 
 ## Real-World Results

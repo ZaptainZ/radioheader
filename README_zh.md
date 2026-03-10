@@ -52,6 +52,8 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **知识短波（Shortwave）** — Topic 条目含项目细节（`[source:MyApp]`）。短波去掉这些细节，提炼为通用的、项目无关的知识单元——跨技术栈可搜索。
 
+**社区共享** — 可选的社区短波库。你的本地经验始终留在本地；发布时经过三关检查（质量评分 ≥6/8、隐私扫描、去重检查）才能进入共享池。投票自动收集，每周聚合，优质条目浮上来，低质条目自然淘汰。
+
 ## 快速开始
 
 ```bash
@@ -82,6 +84,24 @@ RadioHeader (~/.claude/radioheader/)
 
 之后在另一个项目中遇到类似问题，**搜→用→追** 规则启动：先搜 RadioHeader，引用并应用搜到的经验，需要更多细节时追溯到源项目。
 
+### 社区共享
+
+开启社区后（`radioheader community on`），搜索结果同时包含本地和社区条目：
+
+```
+📡 Shortwave (本地精炼)  — 你自己的经验（最高优先级）
+🌐 Community (社区共享)  — 其他用户的条目，附带质量分数
+📂 Topics (详细)         — 你的原始 topic 条目
+```
+
+质量治理采用 [Stigmergy（痕迹协作）](https://zh.wikipedia.org/wiki/%E5%8D%8F%E4%BD%9C%E6%80%A7) 模型——类似蚁群信息素：
+- 新条目有 30 天曝光期
+- 使用时自动投票（LLM 判断因果贡献）
+- 投票每周通过 GitHub Actions 聚合为分数
+- 高分条目标记 `verified`，低分条目衰减并归档
+
+发布需过三关：质量（≥6/8）、隐私扫描（无路径/密钥/来源标签）、去重检查。
+
 ## 使用技巧
 
 **主动触发回流。** Hooks 会自动处理大部分回流，但你也可以随时用自然语言告诉 Claude：
@@ -97,12 +117,16 @@ RadioHeader (~/.claude/radioheader/)
 | 命令 | 功能 |
 |------|------|
 | `radioheader init` | 在项目中初始化经验框架 |
-| `radioheader search <关键词>` | 搜索所有 topics 和 shortwave |
-| `radioheader status` | 查看主题数、条目数、注册项目 |
+| `radioheader search <关键词>` | 搜索 topics、shortwave 和社区库 |
+| `radioheader status` | 查看主题数、条目数、社区状态 |
 | `radioheader doctor` | 健康检查：hooks、规则、注册表 |
 | `radioheader align` | 分析 topics↔shortwave 覆盖率 |
 | `radioheader align --execute` | 输出批量精炼指令供 Claude 执行 |
 | `radioheader align --refs` | 校验并修复 shortwave 引用链接 |
+| `radioheader community on\|off\|status` | 社区共享开关 |
+| `radioheader sync` | 同步社区库 + 上传投票/条目 |
+| `radioheader publish <文件>` | 发布短波到社区（三关检查） |
+| `radioheader publish --auto-detect` | 扫描本地可发布的短波 |
 
 ```bash
 # 按症状搜索，不是按解法搜索
@@ -110,6 +134,10 @@ radioheader search "白屏|启动慢|startup"
 
 # 用参数模式初始化项目
 radioheader init --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
+
+# 开启社区并同步
+radioheader community on
+radioheader sync
 ```
 
 ## 实战经验
