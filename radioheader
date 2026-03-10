@@ -4,14 +4,21 @@ set -e
 # RadioHeader CLI — Cross-project experience sharing for Claude Code
 # Usage: radioheader <command> [options]
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
 TOPICS_DIR="$RADIOHEADER_DIR/topics"
 SHORTWAVE_DIR="$RADIOHEADER_DIR/shortwave"
+COMMUNITY_DIR="$RADIOHEADER_DIR/community"
+COMMUNITY_POOL="$COMMUNITY_DIR/pool"
+CONFIG_FILE="$RADIOHEADER_DIR/config.json"
+PENDING_VOTES="$RADIOHEADER_DIR/pending-votes.jsonl"
 REGISTRY="$RADIOHEADER_DIR/project-registry.md"
 INDEX="$RADIOHEADER_DIR/INDEX.md"
+
+# Default community repository (users can override in config.json)
+DEFAULT_COMMUNITY_REPO="https://github.com/anthropics/radioheader-community.git"
 
 # Colors
 RED='\033[0;31m'
@@ -27,6 +34,64 @@ info()  { echo -e "${BLUE}[RadioHeader]${NC} $1"; }
 ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[RadioHeader]${NC} $1"; }
 err()   { echo -e "${RED}[RadioHeader]${NC} $1"; }
+
+# ============================================================
+# config helpers (JSON read/write without jq dependency)
+# ============================================================
+
+# Read a top-level string value from config.json
+# Usage: config_get "key" [default]
+config_get() {
+  local key="$1"
+  local default="${2:-}"
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "$default"
+    return
+  fi
+  # Simple JSON parser for flat key-value (no nested objects)
+  local val
+  val=$(grep "\"$key\"" "$CONFIG_FILE" 2>/dev/null | head -1 | sed 's/.*"'"$key"'"[[:space:]]*:[[:space:]]*//' | sed 's/[",]//g' | xargs)
+  if [ -n "$val" ]; then
+    echo "$val"
+  else
+    echo "$default"
+  fi
+}
+
+# Write a top-level key-value to config.json
+# Usage: config_set "key" "value"
+config_set() {
+  local key="$1"
+  local value="$2"
+  local config_path="$CONFIG_FILE"
+  python3 -c "
+import json, os
+path = '$config_path'
+d = {}
+if os.path.exists(path):
+    with open(path) as f:
+        try: d = json.load(f)
+        except: d = {}
+v = '$value'
+if v in ('true','false'): v = (v == 'true')
+d['$key'] = v
+with open(path,'w') as f:
+    json.dump(d, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+"
+}
+
+# Check if community is enabled
+community_enabled() {
+  local val
+  val=$(config_get "community" "false")
+  [ "$val" = "true" ]
+}
+
+# Get community repo URL
+community_repo_url() {
+  config_get "community_repo" "$DEFAULT_COMMUNITY_REPO"
+}
 
 # Cross-platform sed -i
 sedi() {
@@ -51,12 +116,14 @@ ${BOLD}USAGE${NC}
   radioheader <command> [options]
 
 ${BOLD}COMMANDS${NC}
-  init      Initialize dynamic experience framework in current project
-  search    Search RadioHeader topics
-  status    Show RadioHeader status
-  doctor    Run health checks
-  align     Analyze topics↔shortwave coverage and batch refine
-  help      Show this help message
+  init        Initialize dynamic experience framework in current project
+  search      Search RadioHeader topics (local + community)
+  status      Show RadioHeader status
+  doctor      Run health checks
+  align       Analyze topics↔shortwave coverage and batch refine
+  community   Manage community shortwave sharing (on|off|status)
+  sync        Sync community shortwave library
+  help        Show this help message
 
 ${BOLD}EXAMPLES${NC}
   radioheader init
@@ -68,6 +135,9 @@ ${BOLD}EXAMPLES${NC}
   radioheader align
   radioheader align --execute
   radioheader align --refs
+  radioheader community on
+  radioheader community status
+  radioheader sync
 
 EOF
 }
@@ -306,6 +376,20 @@ cmd_search() {
     fi
   fi
 
+  # --- Community results (if enabled) ---
+  local community_results=""
+  local community_count=0
+  if community_enabled && [ -d "$COMMUNITY_POOL" ]; then
+    local pool_file_count
+    pool_file_count=$(find "$COMMUNITY_POOL" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$pool_file_count" -gt 0 ]; then
+      community_results=$(grep -n -i -E "$pattern" "$COMMUNITY_POOL"/*.md 2>/dev/null || true)
+      if [ -n "$community_results" ]; then
+        community_count=$(echo "$community_results" | wc -l | tr -d ' ')
+      fi
+    fi
+  fi
+
   # --- Topics results (detailed) ---
   local topic_results=""
   local topic_count=0
@@ -320,7 +404,7 @@ cmd_search() {
     fi
   fi
 
-  total_matches=$((sw_count + topic_count))
+  total_matches=$((sw_count + community_count + topic_count))
 
   if [ "$total_matches" -eq 0 ]; then
     warn "No matches found for: $pattern"
@@ -332,9 +416,9 @@ cmd_search() {
   echo -e "${GREEN}Found $total_matches match(es):${NC}"
   echo ""
 
-  # Display shortwave results first (higher priority)
+  # Display shortwave results first (local = highest priority)
   if [ -n "$sw_results" ]; then
-    echo -e "  ${BOLD}📡 Shortwave (精炼):${NC}"
+    echo -e "  ${BOLD}📡 Shortwave (本地精炼):${NC}"
     echo "$sw_results" | while IFS= read -r line; do
       local file_part="${line%%:*}"
       local rest="${line#*:}"
@@ -343,6 +427,42 @@ cmd_search() {
       local bname
       bname=$(basename "$file_part")
       echo -e "    ${CYAN}$bname${NC}:${YELLOW}$linenum${NC}: $content"
+    done
+    echo ""
+  fi
+
+  # Display community results (second priority, with score labels)
+  if [ -n "$community_results" ]; then
+    # Load scores if available
+    local scores_file="$COMMUNITY_DIR/scores.json"
+    echo -e "  ${BOLD}🌐 Community (社区共享):${NC}"
+    echo "$community_results" | while IFS= read -r line; do
+      local file_part="${line%%:*}"
+      local rest="${line#*:}"
+      local linenum="${rest%%:*}"
+      local content="${rest#*:}"
+      local bname
+      bname=$(basename "$file_part")
+      local sw_id="${bname%.md}"
+      # Try to get score from scores.json
+      local score_label=""
+      if [ -f "$scores_file" ]; then
+        local score
+        score=$(grep "\"$sw_id\"" "$scores_file" 2>/dev/null | grep -o '"score"[[:space:]]*:[[:space:]]*[0-9.]*' | head -1 | sed 's/.*://' | xargs)
+        local usage
+        usage=$(grep "\"$sw_id\"" "$scores_file" 2>/dev/null | grep -o '"usage"[[:space:]]*:[[:space:]]*[0-9]*' | head -1 | sed 's/.*://' | xargs)
+        if [ -n "$score" ]; then
+          # High score + high usage = verified
+          if [ "${usage:-0}" -ge 10 ] 2>/dev/null && [ "$(echo "$score >= 8" | bc 2>/dev/null)" = "1" ] 2>/dev/null; then
+            score_label=" ${GREEN}✅ verified${NC} (score:$score, usage:$usage)"
+          elif [ -n "$usage" ]; then
+            score_label=" ${DIM}(score:$score, usage:$usage)${NC}"
+          else
+            score_label=" ${DIM}(score:$score)${NC}"
+          fi
+        fi
+      fi
+      echo -e "    ${CYAN}$bname${NC}:${YELLOW}$linenum${NC}: $content$score_label"
     done
     echo ""
   fi
@@ -423,6 +543,24 @@ cmd_status() {
     project_count=$((project_count > 2 ? project_count - 2 : 0))
   fi
   echo -e "  Projects:     ${BOLD}$project_count${NC} registered"
+
+  # --- Community status ---
+  echo ""
+  echo -e "${BOLD}Community${NC}"
+  if community_enabled; then
+    echo -e "  Status:     ${GREEN}ON${NC}"
+    if [ -d "$COMMUNITY_DIR/.git" ]; then
+      local pool_count=0
+      if [ -d "$COMMUNITY_POOL" ]; then
+        pool_count=$(find "$COMMUNITY_POOL" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+      fi
+      echo -e "  Pool:       ${BOLD}$pool_count${NC} entries"
+    else
+      echo -e "  Pool:       ${YELLOW}not synced${NC} (run 'radioheader sync')"
+    fi
+  else
+    echo -e "  Status:     ${DIM}OFF${NC} (enable with 'radioheader community on')"
+  fi
 
   # --- Hooks check ---
   echo ""
@@ -1109,15 +1247,215 @@ refs: topics/${matched_topic}" "$f"
 }
 
 # ============================================================
+# community
+# ============================================================
+
+cmd_community() {
+  local action="${1:-status}"
+
+  case "$action" in
+    on)
+      config_set "community" "true"
+      ok "Community sharing enabled."
+      echo ""
+      echo "Next steps:"
+      echo "  1. Run 'radioheader sync' to download the community library"
+      echo "  2. Search results will now include community entries"
+      echo ""
+      ;;
+    off)
+      config_set "community" "false"
+      ok "Community sharing disabled."
+      echo "  Local shortwave remains unchanged. community/ directory preserved but not updated."
+      echo ""
+      ;;
+    status)
+      echo ""
+      echo -e "${BOLD}Community Status${NC}"
+      echo ""
+      if community_enabled; then
+        echo -e "  Toggle:     ${GREEN}ON${NC}"
+      else
+        echo -e "  Toggle:     ${DIM}OFF${NC}"
+        echo ""
+        echo -e "  ${DIM}Enable with: radioheader community on${NC}"
+        echo ""
+        return 0
+      fi
+
+      local repo_url
+      repo_url=$(community_repo_url)
+      echo -e "  Repository: ${CYAN}$repo_url${NC}"
+
+      if [ -d "$COMMUNITY_DIR/.git" ]; then
+        echo -e "  Synced:     ${GREEN}yes${NC}"
+        local pool_count=0
+        if [ -d "$COMMUNITY_POOL" ]; then
+          pool_count=$(find "$COMMUNITY_POOL" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+        fi
+        echo -e "  Pool:       ${BOLD}$pool_count${NC} entries"
+
+        # Last sync time
+        if [[ "$OSTYPE" == darwin* ]]; then
+          local last_sync
+          last_sync=$(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$COMMUNITY_DIR/.git/FETCH_HEAD" 2>/dev/null || echo "unknown")
+          echo -e "  Last sync:  $last_sync"
+        fi
+
+        # Scores info
+        if [ -f "$COMMUNITY_DIR/scores.json" ]; then
+          echo -e "  Scores:     ${GREEN}✓${NC} available"
+        else
+          echo -e "  Scores:     ${DIM}not yet generated${NC}"
+        fi
+      else
+        echo -e "  Synced:     ${YELLOW}not yet${NC}"
+        echo ""
+        echo -e "  ${DIM}Run 'radioheader sync' to download the community library${NC}"
+      fi
+
+      # Pending votes
+      local pending_votes=0
+      if [ -f "$PENDING_VOTES" ]; then
+        pending_votes=$(wc -l < "$PENDING_VOTES" | tr -d ' ')
+      fi
+      if [ "$pending_votes" -gt 0 ]; then
+        echo -e "  Pending votes: ${YELLOW}$pending_votes${NC} (will upload on next sync)"
+      fi
+
+      echo ""
+      ;;
+    --help|-h)
+      cat <<EOF
+${BOLD}radioheader community${NC} — Manage community shortwave sharing
+
+${BOLD}USAGE${NC}
+  radioheader community [on|off|status]
+
+${BOLD}ACTIONS${NC}
+  on       Enable community sharing (search + vote + sync)
+  off      Disable community sharing (local-only mode)
+  status   Show current community status (default)
+
+When enabled:
+  - Search includes community pool entries with scores
+  - Votes are recorded locally and uploaded on sync
+  - 'radioheader sync' pulls latest community library
+
+When disabled:
+  - Search only looks at local shortwave/ and topics/
+  - No data is uploaded or downloaded
+  - community/ directory is preserved but not updated
+
+EOF
+      ;;
+    *)
+      err "Unknown action: $action"
+      echo "Usage: radioheader community [on|off|status]"
+      return 1
+      ;;
+  esac
+}
+
+# ============================================================
+# sync
+# ============================================================
+
+cmd_sync() {
+  if ! community_enabled; then
+    warn "Community sharing is disabled."
+    echo "  Enable with: radioheader community on"
+    return 1
+  fi
+
+  local repo_url
+  repo_url=$(community_repo_url)
+
+  if [ -d "$COMMUNITY_DIR/.git" ]; then
+    # Pull latest
+    info "Pulling latest community library..."
+    if git -C "$COMMUNITY_DIR" pull --rebase --quiet 2>/dev/null; then
+      ok "Community library updated."
+    else
+      warn "Pull failed. Trying reset..."
+      git -C "$COMMUNITY_DIR" fetch origin 2>/dev/null
+      git -C "$COMMUNITY_DIR" reset --hard origin/main 2>/dev/null || \
+        git -C "$COMMUNITY_DIR" reset --hard origin/master 2>/dev/null
+      ok "Community library force-updated."
+    fi
+  else
+    # Clone
+    info "Cloning community library from $repo_url ..."
+    mkdir -p "$COMMUNITY_DIR"
+    if git clone --depth 1 --quiet "$repo_url" "$COMMUNITY_DIR" 2>/dev/null; then
+      ok "Community library cloned."
+    else
+      err "Failed to clone community repository."
+      err "Check your network connection and the repository URL."
+      echo ""
+      echo "  Current URL: $repo_url"
+      echo "  To change:   Edit ~/.claude/radioheader/config.json"
+      echo ""
+      # Clean up empty directory
+      rmdir "$COMMUNITY_DIR" 2>/dev/null || true
+      return 1
+    fi
+  fi
+
+  # Upload pending votes
+  if [ -f "$PENDING_VOTES" ] && [ -s "$PENDING_VOTES" ]; then
+    local vote_count
+    vote_count=$(wc -l < "$PENDING_VOTES" | tr -d ' ')
+    info "Uploading $vote_count pending vote(s)..."
+
+    # Determine current month file
+    local month_file
+    month_file="$COMMUNITY_DIR/votes/$(date '+%Y-%m').jsonl"
+    mkdir -p "$COMMUNITY_DIR/votes"
+
+    # Append votes
+    cat "$PENDING_VOTES" >> "$month_file"
+
+    # Commit and push votes
+    if git -C "$COMMUNITY_DIR" add votes/ 2>/dev/null && \
+       git -C "$COMMUNITY_DIR" commit -m "Add votes from $(date '+%Y-%m-%d')" --quiet 2>/dev/null && \
+       git -C "$COMMUNITY_DIR" push --quiet 2>/dev/null; then
+      ok "Votes uploaded successfully."
+      # Clear pending votes
+      > "$PENDING_VOTES"
+    else
+      warn "Failed to push votes. They remain in pending-votes.jsonl for next sync."
+    fi
+  fi
+
+  # Show stats
+  local pool_count=0
+  if [ -d "$COMMUNITY_POOL" ]; then
+    pool_count=$(find "$COMMUNITY_POOL" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  fi
+
+  echo ""
+  echo -e "  Community pool: ${BOLD}$pool_count${NC} entries"
+
+  if [ -f "$COMMUNITY_DIR/scores.json" ]; then
+    echo -e "  Scores:         ${GREEN}available${NC}"
+  fi
+
+  echo ""
+}
+
+# ============================================================
 # Main — subcommand routing
 # ============================================================
 
 case "${1:-help}" in
-  init)    shift; cmd_init "$@" ;;
-  search)  shift; cmd_search "$@" ;;
-  status)  cmd_status ;;
-  doctor)  cmd_doctor ;;
-  align)   shift; cmd_align "$@" ;;
+  init)       shift; cmd_init "$@" ;;
+  search)     shift; cmd_search "$@" ;;
+  status)     cmd_status ;;
+  doctor)     cmd_doctor ;;
+  align)      shift; cmd_align "$@" ;;
+  community)  shift; cmd_community "$@" ;;
+  sync)       cmd_sync ;;
   help|--help|-h) cmd_help ;;
   --version|-v) echo "radioheader v$VERSION" ;;
   *)

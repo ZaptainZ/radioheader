@@ -276,6 +276,44 @@ if [ -z "$CLI_INSTALLED" ]; then
   fi
 fi
 
+# --- Step 6: Community toggle ---
+
+CONFIG_FILE="$RADIOHEADER_DIR/config.json"
+
+echo ""
+info "Community Shortwave Sharing"
+echo "  RadioHeader can search a shared community library of shortwave entries."
+echo "  When enabled, search results include community entries with quality scores."
+echo "  You can toggle this anytime with: radioheader community on|off"
+echo ""
+read -p "  Enable community sharing? (recommended) [Y/n] " -n 1 -r
+echo
+
+COMMUNITY_ENABLED="true"
+if [[ $REPLY =~ ^[Nn]$ ]]; then
+  COMMUNITY_ENABLED="false"
+fi
+
+python3 -c "
+import json, os
+path = '$CONFIG_FILE'
+d = {}
+if os.path.exists(path):
+    with open(path) as f:
+        try: d = json.load(f)
+        except: d = {}
+d['community'] = '$COMMUNITY_ENABLED' == 'true'
+with open(path,'w') as f:
+    json.dump(d, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+" 2>/dev/null || true
+
+if [ "$COMMUNITY_ENABLED" = "true" ]; then
+  ok "Community sharing enabled. Run 'radioheader sync' to download the library."
+else
+  ok "Community sharing disabled. Enable later with: radioheader community on"
+fi
+
 # --- Done ---
 
 echo ""
@@ -288,12 +326,17 @@ echo "  1. Open any project with Claude Code"
 echo "  2. Run 'radioheader init' to set up the dynamic experience framework"
 echo "  3. As you work, experience flows into ~/.claude/radioheader/topics/"
 echo "  4. All projects can search and use shared experience"
+if [ "$COMMUNITY_ENABLED" = "true" ]; then
+echo "  5. Run 'radioheader sync' to download the community library"
+fi
 echo ""
 echo "CLI commands:"
-echo "  radioheader init      # Initialize a project"
-echo "  radioheader search    # Search topics"
-echo "  radioheader status    # Show status"
-echo "  radioheader doctor    # Health check"
+echo "  radioheader init        # Initialize a project"
+echo "  radioheader search      # Search topics (local + community)"
+echo "  radioheader status      # Show status"
+echo "  radioheader doctor      # Health check"
+echo "  radioheader community   # Manage community sharing"
+echo "  radioheader sync        # Sync community library"
 echo ""
 echo "Paths:"
 echo "  RadioHeader:  $RADIOHEADER_DIR/"
