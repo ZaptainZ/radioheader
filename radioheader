@@ -18,7 +18,7 @@ REGISTRY="$RADIOHEADER_DIR/project-registry.md"
 INDEX="$RADIOHEADER_DIR/INDEX.md"
 
 # Default community repository (users can override in config.json)
-DEFAULT_COMMUNITY_REPO="https://github.com/anthropics/radioheader-community.git"
+DEFAULT_COMMUNITY_REPO="https://github.com/ZaptainZ/radioheader-community.git"
 
 # Colors
 RED='\033[0;31m'
