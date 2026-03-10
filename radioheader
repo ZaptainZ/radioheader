@@ -123,6 +123,7 @@ ${BOLD}COMMANDS${NC}
   align       Analyze topics↔shortwave coverage and batch refine
   community   Manage community shortwave sharing (on|off|status)
   sync        Sync community shortwave library
+  publish     Publish local shortwave to community (quality+privacy+dedup)
   help        Show this help message
 
 ${BOLD}EXAMPLES${NC}
@@ -138,6 +139,8 @@ ${BOLD}EXAMPLES${NC}
   radioheader community on
   radioheader community status
   radioheader sync
+  radioheader publish sw-ios-task-inherits-mainactor.md
+  radioheader publish --auto-detect
 
 EOF
 }
@@ -1428,6 +1431,35 @@ cmd_sync() {
     fi
   fi
 
+  # Upload pending publish entries
+  local publish_dir="$RADIOHEADER_DIR/pending-publish"
+  if [ -d "$publish_dir" ]; then
+    local publish_count
+    publish_count=$(find "$publish_dir" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$publish_count" -gt 0 ]; then
+      info "Publishing $publish_count entry/entries to community pool..."
+      mkdir -p "$COMMUNITY_POOL"
+      local published=0
+      for pf in "$publish_dir"/*.md; do
+        [ -f "$pf" ] || continue
+        local pf_name
+        pf_name=$(basename "$pf")
+        cp "$pf" "$COMMUNITY_POOL/$pf_name"
+        published=$((published + 1))
+      done
+
+      if git -C "$COMMUNITY_DIR" add pool/ 2>/dev/null && \
+         git -C "$COMMUNITY_DIR" commit -m "Add $published shortwave entries ($(date '+%Y-%m-%d'))" --quiet 2>/dev/null && \
+         git -C "$COMMUNITY_DIR" push --quiet 2>/dev/null; then
+        ok "$published entries published to community pool."
+        # Clear pending-publish
+        rm -f "$publish_dir"/*.md
+      else
+        warn "Failed to push published entries. They remain in pending-publish/ for next sync."
+      fi
+    fi
+  fi
+
   # Show stats
   local pool_count=0
   if [ -d "$COMMUNITY_POOL" ]; then
@@ -1445,6 +1477,374 @@ cmd_sync() {
 }
 
 # ============================================================
+# publish
+# ============================================================
+
+PENDING_PUBLISH="$RADIOHEADER_DIR/pending-publish"
+
+# Privacy patterns to scan for
+_privacy_patterns() {
+  # Returns a grep -E compatible pattern for privacy-sensitive content
+  echo '\[来源:|/Users/|/home/|/root/|C:\\Users\\|API[_-]?[Kk]ey|api[_-]?key|SECRET|sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36}|xox[bpoas]-[a-zA-Z0-9-]+'
+}
+
+# Check a single shortwave file for quality (returns score 0-8)
+_quality_check() {
+  local file="$1"
+  local score=0
+  local issues=""
+
+  # Read file content
+  local content
+  content=$(cat "$file")
+
+  # Dimension 1: Searchability (0-2)
+  # Check tags field has >=3 terms, includes both zh/en
+  local tags_line
+  tags_line=$(grep '^tags:' "$file" 2>/dev/null || true)
+  if [ -n "$tags_line" ]; then
+    local tag_count
+    tag_count=$(echo "$tags_line" | tr '|' '\n' | wc -l | tr -d ' ')
+    if [ "$tag_count" -ge 5 ]; then
+      score=$((score + 2))
+    elif [ "$tag_count" -ge 3 ]; then
+      score=$((score + 1))
+      issues+="  ⚠ tags: only $tag_count terms (recommend ≥5)\n"
+    else
+      issues+="  ✗ tags: only $tag_count terms (need ≥3)\n"
+    fi
+  else
+    issues+="  ✗ missing tags field\n"
+  fi
+
+  # Dimension 2: Actionability (0-2)
+  # Check for fix/cause fields with concrete content
+  local has_fix has_cause
+  has_fix=$(grep '^fix:' "$file" 2>/dev/null | wc -l | tr -d ' ')
+  has_cause=$(grep '^cause:' "$file" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$has_fix" -gt 0 ] && [ "$has_cause" -gt 0 ]; then
+    score=$((score + 2))
+  elif [ "$has_fix" -gt 0 ] || [ "$has_cause" -gt 0 ]; then
+    score=$((score + 1))
+    issues+="  ⚠ missing cause or fix field\n"
+  else
+    issues+="  ✗ missing both cause and fix fields\n"
+  fi
+
+  # Dimension 3: Independence (0-2)
+  # Check for project-specific references that should be removed
+  local privacy_pattern
+  privacy_pattern=$(_privacy_patterns)
+  local leaks
+  leaks=$(grep -E "$privacy_pattern" "$file" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$leaks" -eq 0 ]; then
+    score=$((score + 2))
+  elif [ "$leaks" -le 2 ]; then
+    score=$((score + 1))
+    issues+="  ⚠ $leaks potential privacy leak(s) found\n"
+  else
+    issues+="  ✗ $leaks privacy leaks found\n"
+  fi
+
+  # Dimension 4: Precision (0-2)
+  # Check for symptoms field and title specificity
+  local has_symptoms has_title
+  has_symptoms=$(grep '^symptoms:' "$file" 2>/dev/null | wc -l | tr -d ' ')
+  has_title=$(grep '^###' "$file" 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$has_symptoms" -gt 0 ] && [ "$has_title" -gt 0 ]; then
+    # Check title length (should be descriptive, not too short)
+    local title
+    title=$(grep '^###' "$file" | head -1 | sed 's/^###[[:space:]]*//')
+    local title_len=${#title}
+    if [ "$title_len" -ge 15 ]; then
+      score=$((score + 2))
+    else
+      score=$((score + 1))
+      issues+="  ⚠ title too short ($title_len chars)\n"
+    fi
+  elif [ "$has_title" -gt 0 ]; then
+    score=$((score + 1))
+    issues+="  ⚠ missing symptoms field\n"
+  else
+    issues+="  ✗ missing ### title\n"
+  fi
+
+  echo "$score"
+  if [ -n "$issues" ]; then
+    echo -e "$issues" >&2
+  fi
+}
+
+# Check for duplicates in community pool
+_dedup_check() {
+  local file="$1"
+  if [ ! -d "$COMMUNITY_POOL" ]; then
+    echo "0"
+    return
+  fi
+
+  local pool_count
+  pool_count=$(find "$COMMUNITY_POOL" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$pool_count" -eq 0 ]; then
+    echo "0"
+    return
+  fi
+
+  local bname
+  bname=$(basename "$file" .md)
+
+  # Check 1: exact filename match
+  if [ -f "$COMMUNITY_POOL/$bname.md" ]; then
+    echo "exact"
+    return
+  fi
+
+  # Check 2: slug similarity (same domain prefix + overlapping keywords)
+  local domain_prefix
+  domain_prefix=$(echo "$bname" | sed 's/^sw-\([a-z]*\)-.*/\1/')
+  local slug_keywords
+  slug_keywords=$(echo "$bname" | sed 's/^sw-[a-z]*-//' | tr '-' '\n')
+
+  local best_match=""
+  local best_overlap=0
+  for pf in "$COMMUNITY_POOL"/sw-"$domain_prefix"-*.md; do
+    [ -f "$pf" ] || continue
+    local pf_base
+    pf_base=$(basename "$pf" .md)
+    local pf_keywords
+    pf_keywords=$(echo "$pf_base" | sed 's/^sw-[a-z]*-//' | tr '-' '\n')
+
+    # Count overlapping keywords
+    local overlap=0
+    for kw in $slug_keywords; do
+      if echo "$pf_keywords" | grep -qw "$kw"; then
+        overlap=$((overlap + 1))
+      fi
+    done
+    if [ "$overlap" -gt "$best_overlap" ]; then
+      best_overlap=$overlap
+      best_match="$pf_base"
+    fi
+  done
+
+  # Check 3: tags overlap
+  local file_tags
+  file_tags=$(grep '^tags:' "$file" 2>/dev/null | sed 's/^tags:[[:space:]]*//' | tr '|' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort)
+  if [ -n "$file_tags" ]; then
+    for pf in "$COMMUNITY_POOL"/sw-"$domain_prefix"-*.md; do
+      [ -f "$pf" ] || continue
+      local pf_tags
+      pf_tags=$(grep '^tags:' "$pf" 2>/dev/null | sed 's/^tags:[[:space:]]*//' | tr '|' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sort)
+      if [ -n "$pf_tags" ]; then
+        local common
+        common=$(comm -12 <(echo "$file_tags") <(echo "$pf_tags") | wc -l | tr -d ' ')
+        local total
+        total=$(echo "$file_tags" | wc -l | tr -d ' ')
+        if [ "$total" -gt 0 ] && [ "$common" -gt 0 ]; then
+          local pct=$((common * 100 / total))
+          if [ "$pct" -ge 60 ]; then
+            local pf_base
+            pf_base=$(basename "$pf" .md)
+            if [ "$pct" -gt "$best_overlap" ] || [ -z "$best_match" ]; then
+              best_overlap=$pct
+              best_match="$pf_base (tags ${pct}% overlap)"
+            fi
+          fi
+        fi
+      fi
+    done
+  fi
+
+  if [ "$best_overlap" -ge 3 ] || [ -n "$best_match" ]; then
+    echo "similar:$best_match"
+  else
+    echo "0"
+  fi
+}
+
+cmd_publish() {
+  local mode="interactive"
+  local files_to_publish=()
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --auto-detect) mode="auto"; shift ;;
+      --help|-h)
+        cat <<EOF
+${BOLD}radioheader publish${NC} — Publish local shortwave to community
+
+${BOLD}USAGE${NC}
+  radioheader publish <file>           Publish a specific shortwave file
+  radioheader publish --auto-detect    Scan local shortwave for publishable entries
+
+${BOLD}THREE GATES${NC}
+  ① Quality:  Four-dimension score ≥ 6/8 (Searchability, Actionability, Independence, Precision)
+  ② Privacy:  Regex scan for [来源:], project paths, /Users/, API keys
+  ③ Dedup:    Slug + tags similarity check against community pool
+
+Entries passing all three gates are staged in pending-publish/.
+Run 'radioheader sync' to push them to the community repository.
+
+EOF
+        return 0
+        ;;
+      *)
+        if [ -f "$1" ]; then
+          files_to_publish+=("$1")
+        elif [ -f "$SHORTWAVE_DIR/$1" ]; then
+          files_to_publish+=("$SHORTWAVE_DIR/$1")
+        elif [ -f "$SHORTWAVE_DIR/$1.md" ]; then
+          files_to_publish+=("$SHORTWAVE_DIR/$1.md")
+        else
+          err "File not found: $1"
+          return 1
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if ! community_enabled; then
+    warn "Community sharing is disabled."
+    echo "  Enable with: radioheader community on"
+    return 1
+  fi
+
+  # Auto-detect mode: scan all local shortwave
+  if [ "$mode" = "auto" ]; then
+    if [ ! -d "$SHORTWAVE_DIR" ]; then
+      err "No local shortwave directory found."
+      return 1
+    fi
+    for f in "$SHORTWAVE_DIR"/*.md; do
+      [ -f "$f" ] || continue
+      # Skip if already in community pool
+      local bname
+      bname=$(basename "$f")
+      if [ -f "$COMMUNITY_POOL/$bname" ]; then
+        continue
+      fi
+      # Skip if already in pending-publish
+      if [ -f "$PENDING_PUBLISH/$bname" ]; then
+        continue
+      fi
+      files_to_publish+=("$f")
+    done
+    if [ ${#files_to_publish[@]} -eq 0 ]; then
+      ok "No new entries to publish. All local shortwave already in community or pending."
+      return 0
+    fi
+    info "Found ${#files_to_publish[@]} candidate(s) for publishing."
+    echo ""
+  fi
+
+  if [ ${#files_to_publish[@]} -eq 0 ]; then
+    err "No files specified."
+    echo "Usage: radioheader publish <file> or radioheader publish --auto-detect"
+    return 1
+  fi
+
+  mkdir -p "$PENDING_PUBLISH"
+
+  local passed=0
+  local failed=0
+  local skipped=0
+
+  for file in "${files_to_publish[@]}"; do
+    local bname
+    bname=$(basename "$file")
+    echo -e "${BOLD}━━━ $bname ━━━${NC}"
+
+    # Gate 1: Quality
+    local score
+    local quality_issues
+    quality_issues=$(mktemp)
+    score=$(_quality_check "$file" 2>"$quality_issues")
+    local grade="D"
+    if [ "$score" -ge 7 ]; then grade="A"
+    elif [ "$score" -ge 5 ]; then grade="B"
+    elif [ "$score" -ge 3 ]; then grade="C"
+    fi
+
+    if [ "$score" -ge 6 ]; then
+      echo -e "  ① Quality:  ${GREEN}PASS${NC} (${score}/8, Grade $grade)"
+    else
+      echo -e "  ① Quality:  ${RED}FAIL${NC} (${score}/8, Grade $grade, need ≥6)"
+      if [ -s "$quality_issues" ]; then
+        cat "$quality_issues" | sed 's/^/  /'
+      fi
+      rm -f "$quality_issues"
+      failed=$((failed + 1))
+      echo ""
+      continue
+    fi
+    if [ -s "$quality_issues" ]; then
+      cat "$quality_issues" | sed 's/^/  /'
+    fi
+    rm -f "$quality_issues"
+
+    # Gate 2: Privacy
+    local privacy_pattern
+    privacy_pattern=$(_privacy_patterns)
+    local privacy_hits
+    privacy_hits=$(grep -n -E "$privacy_pattern" "$file" 2>/dev/null || true)
+    if [ -z "$privacy_hits" ]; then
+      echo -e "  ② Privacy:  ${GREEN}PASS${NC} (no sensitive patterns detected)"
+    else
+      local hit_count
+      hit_count=$(echo "$privacy_hits" | wc -l | tr -d ' ')
+      echo -e "  ② Privacy:  ${RED}FAIL${NC} ($hit_count sensitive pattern(s) found)"
+      echo "$privacy_hits" | while IFS= read -r line; do
+        echo -e "    ${YELLOW}→${NC} $line"
+      done
+      failed=$((failed + 1))
+      echo ""
+      continue
+    fi
+
+    # Gate 3: Dedup
+    local dedup_result
+    dedup_result=$(_dedup_check "$file")
+    if [ "$dedup_result" = "0" ]; then
+      echo -e "  ③ Dedup:    ${GREEN}PASS${NC} (no duplicates in community pool)"
+    elif [ "$dedup_result" = "exact" ]; then
+      echo -e "  ③ Dedup:    ${YELLOW}SKIP${NC} (exact match already in community pool)"
+      skipped=$((skipped + 1))
+      echo ""
+      continue
+    else
+      local similar_to
+      similar_to="${dedup_result#similar:}"
+      echo -e "  ③ Dedup:    ${YELLOW}WARN${NC} (similar entry: $similar_to)"
+      echo -e "    ${DIM}Proceeding anyway — review recommended before sync${NC}"
+    fi
+
+    # All gates passed — stage for publishing
+    cp "$file" "$PENDING_PUBLISH/$bname"
+    echo -e "  ${GREEN}→ Staged${NC} in pending-publish/"
+    passed=$((passed + 1))
+    echo ""
+  done
+
+  # Summary
+  echo -e "${BOLD}Summary${NC}"
+  echo -e "  Passed:  ${GREEN}$passed${NC}"
+  if [ "$failed" -gt 0 ]; then
+    echo -e "  Failed:  ${RED}$failed${NC}"
+  fi
+  if [ "$skipped" -gt 0 ]; then
+    echo -e "  Skipped: ${YELLOW}$skipped${NC}"
+  fi
+
+  if [ "$passed" -gt 0 ]; then
+    echo ""
+    echo -e "  ${DIM}Run 'radioheader sync' to push staged entries to the community repository.${NC}"
+  fi
+  echo ""
+}
+
+# ============================================================
 # Main — subcommand routing
 # ============================================================
 
@@ -1456,6 +1856,7 @@ case "${1:-help}" in
   align)      shift; cmd_align "$@" ;;
   community)  shift; cmd_community "$@" ;;
   sync)       cmd_sync ;;
+  publish)    shift; cmd_publish "$@" ;;
   help|--help|-h) cmd_help ;;
   --version|-v) echo "radioheader v$VERSION" ;;
   *)
