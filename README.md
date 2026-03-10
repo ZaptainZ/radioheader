@@ -127,6 +127,8 @@ This is useful after a long session, when you finish a feature, or whenever you 
 | `radioheader sync` | Pull latest community library + push votes/entries |
 | `radioheader publish <file>` | Publish a shortwave to community (3-gate check) |
 | `radioheader publish --auto-detect` | Scan all local shortwave for publishable entries |
+| `radioheader device-sync init <url>` | Set up cross-device sync via git |
+| `radioheader device-sync push\|pull` | Push/pull RadioHeader data between devices |
 
 ```bash
 # Search by symptoms, not solutions

@@ -127,6 +127,8 @@ RadioHeader (~/.claude/radioheader/)
 | `radioheader sync` | 同步社区库 + 上传投票/条目 |
 | `radioheader publish <文件>` | 发布短波到社区（三关检查） |
 | `radioheader publish --auto-detect` | 扫描本地可发布的短波 |
+| `radioheader device-sync init <url>` | 跨设备同步初始化（via git） |
+| `radioheader device-sync push\|pull` | 在设备间推送/拉取 RadioHeader 数据 |
 
 ```bash
 # 按症状搜索，不是按解法搜索

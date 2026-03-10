@@ -124,6 +124,7 @@ ${BOLD}COMMANDS${NC}
   community   Manage community shortwave sharing (on|off|status)
   sync        Sync community shortwave library
   publish     Publish local shortwave to community (quality+privacy+dedup)
+  device-sync Sync RadioHeader data across devices via git
   help        Show this help message
 
 ${BOLD}EXAMPLES${NC}
@@ -1845,18 +1846,251 @@ EOF
 }
 
 # ============================================================
+# device-sync
+# ============================================================
+
+cmd_device_sync() {
+  local action="${1:-status}"
+
+  case "$action" in
+    init)
+      # Initialize git repo in radioheader directory
+      if [ -d "$RADIOHEADER_DIR/.git" ]; then
+        warn "Already a git repository: $RADIOHEADER_DIR"
+        echo "  Use 'radioheader device-sync push' or 'radioheader device-sync pull'"
+        return 0
+      fi
+
+      # Ask for remote URL
+      local remote_url="${2:-}"
+      if [ -z "$remote_url" ]; then
+        echo ""
+        echo -e "${BOLD}Device Sync Setup${NC}"
+        echo "  This will enable syncing your RadioHeader data across devices via git."
+        echo ""
+        echo "  Create a private GitHub repo first, then paste the URL:"
+        echo "  Example: https://github.com/yourname/my-radioheader.git"
+        echo ""
+        read -p "  Remote URL: " remote_url
+        if [ -z "$remote_url" ]; then
+          err "Remote URL is required."
+          return 1
+        fi
+      fi
+
+      # Create .gitignore
+      cat > "$RADIOHEADER_DIR/.gitignore" <<'GITIGNORE'
+# Device-specific (each device clones community separately)
+community/
+
+# Local state
+config.json
+pending-votes.jsonl
+pending-publish/
+
+# Project templates (installed by install.sh)
+templates/
+GITIGNORE
+
+      cd "$RADIOHEADER_DIR"
+      git init --quiet
+      git add -A
+      git commit -m "Initial RadioHeader sync" --quiet
+      git remote add origin "$remote_url" 2>/dev/null || git remote set-url origin "$remote_url"
+
+      if git push -u origin main --quiet 2>/dev/null || git push -u origin master --quiet 2>/dev/null; then
+        ok "Device sync initialized and pushed."
+      else
+        warn "Push failed — the remote may not exist yet or may already have content."
+        echo "  Try: git -C $RADIOHEADER_DIR push -u origin main"
+      fi
+
+      echo ""
+      echo "On your other devices, run:"
+      echo "  radioheader device-sync clone $remote_url"
+      echo ""
+      ;;
+
+    clone)
+      local remote_url="${2:-}"
+      if [ -z "$remote_url" ]; then
+        err "Usage: radioheader device-sync clone <remote-url>"
+        return 1
+      fi
+
+      if [ -d "$RADIOHEADER_DIR/.git" ]; then
+        warn "Already a git repository. Use 'radioheader device-sync pull' instead."
+        return 1
+      fi
+
+      # Backup existing data
+      if [ -d "$RADIOHEADER_DIR/topics" ] || [ -d "$RADIOHEADER_DIR/shortwave" ]; then
+        local backup_dir="$RADIOHEADER_DIR.backup.$(date +%Y%m%d%H%M%S)"
+        warn "Backing up existing data to $backup_dir"
+        cp -R "$RADIOHEADER_DIR" "$backup_dir"
+      fi
+
+      # Save local config before clone overwrites
+      local saved_config=""
+      if [ -f "$CONFIG_FILE" ]; then
+        saved_config=$(cat "$CONFIG_FILE")
+      fi
+
+      # Clone into temp, then move
+      local tmp_dir
+      tmp_dir=$(mktemp -d)
+      if git clone --quiet "$remote_url" "$tmp_dir" 2>/dev/null; then
+        # Move git data into radioheader dir
+        rm -rf "$RADIOHEADER_DIR/.git"
+        mv "$tmp_dir/.git" "$RADIOHEADER_DIR/.git"
+        git -C "$RADIOHEADER_DIR" checkout -- . 2>/dev/null
+        rm -rf "$tmp_dir"
+
+        # Restore local config
+        if [ -n "$saved_config" ]; then
+          echo "$saved_config" > "$CONFIG_FILE"
+        fi
+
+        ok "Device sync cloned. Your topics/ and shortwave/ are now synced."
+      else
+        err "Failed to clone from $remote_url"
+        rm -rf "$tmp_dir"
+        return 1
+      fi
+      ;;
+
+    push)
+      if [ ! -d "$RADIOHEADER_DIR/.git" ]; then
+        err "Not a git repository. Run 'radioheader device-sync init' first."
+        return 1
+      fi
+
+      cd "$RADIOHEADER_DIR"
+      git add -A
+      if git diff --cached --quiet 2>/dev/null; then
+        ok "Nothing to push. Already up to date."
+        return 0
+      fi
+
+      git commit -m "Sync RadioHeader ($(date '+%Y-%m-%d %H:%M'))" --quiet
+      if git push --quiet 2>/dev/null; then
+        ok "Pushed to remote."
+      else
+        warn "Push failed. Try: git -C $RADIOHEADER_DIR push"
+      fi
+      ;;
+
+    pull)
+      if [ ! -d "$RADIOHEADER_DIR/.git" ]; then
+        err "Not a git repository. Run 'radioheader device-sync init' first."
+        return 1
+      fi
+
+      cd "$RADIOHEADER_DIR"
+      # Stash local changes
+      local has_changes=false
+      if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+        has_changes=true
+        git stash --quiet 2>/dev/null
+      fi
+
+      if git pull --rebase --quiet 2>/dev/null; then
+        ok "Pulled latest from remote."
+      else
+        warn "Pull failed. You may need to resolve conflicts manually."
+      fi
+
+      if [ "$has_changes" = true ]; then
+        git stash pop --quiet 2>/dev/null || warn "Stash pop had conflicts. Check git status."
+      fi
+      ;;
+
+    status)
+      echo ""
+      echo -e "${BOLD}Device Sync Status${NC}"
+      echo ""
+      if [ -d "$RADIOHEADER_DIR/.git" ]; then
+        echo -e "  Git:      ${GREEN}initialized${NC}"
+        local remote
+        remote=$(git -C "$RADIOHEADER_DIR" remote get-url origin 2>/dev/null || echo "none")
+        echo -e "  Remote:   ${CYAN}$remote${NC}"
+        local branch
+        branch=$(git -C "$RADIOHEADER_DIR" branch --show-current 2>/dev/null || echo "unknown")
+        echo -e "  Branch:   $branch"
+        local status_msg
+        if git -C "$RADIOHEADER_DIR" diff --quiet 2>/dev/null && git -C "$RADIOHEADER_DIR" diff --cached --quiet 2>/dev/null; then
+          status_msg="${GREEN}clean${NC}"
+        else
+          local changed
+          changed=$(git -C "$RADIOHEADER_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+          status_msg="${YELLOW}$changed file(s) changed${NC}"
+        fi
+        echo -e "  Status:   $status_msg"
+      else
+        echo -e "  Git:      ${DIM}not initialized${NC}"
+        echo ""
+        echo "  Set up with: radioheader device-sync init <remote-url>"
+      fi
+      echo ""
+      ;;
+
+    --help|-h)
+      cat <<EOF
+${BOLD}radioheader device-sync${NC} — Sync RadioHeader data across devices via git
+
+${BOLD}USAGE${NC}
+  radioheader device-sync [init|clone|push|pull|status]
+
+${BOLD}ACTIONS${NC}
+  init <url>     Initialize git in ~/.claude/radioheader/ and push to remote
+  clone <url>    Clone remote into existing radioheader directory
+  push           Commit and push local changes
+  pull           Pull latest from remote (stashes local changes)
+  status         Show sync status (default)
+
+${BOLD}WHAT SYNCS${NC}
+  ✓ topics/          — your experience entries
+  ✓ shortwave/       — refined knowledge units
+  ✓ INDEX.md         — master index
+  ✓ project-registry.md
+
+${BOLD}WHAT DOESN'T SYNC${NC}
+  ✗ community/       — each device clones separately
+  ✗ config.json      — device-specific settings
+  ✗ pending-votes    — local state
+  ✗ templates/       — installed by install.sh
+
+${BOLD}SETUP${NC}
+  1. Create a private GitHub repo (e.g. my-radioheader)
+  2. On Device A:  radioheader device-sync init https://github.com/you/my-radioheader.git
+  3. On Device B:  radioheader device-sync clone https://github.com/you/my-radioheader.git
+  4. Regular use:  radioheader device-sync push / pull
+
+EOF
+      ;;
+
+    *)
+      err "Unknown action: $action"
+      echo "Usage: radioheader device-sync [init|clone|push|pull|status]"
+      return 1
+      ;;
+  esac
+}
+
+# ============================================================
 # Main — subcommand routing
 # ============================================================
 
 case "${1:-help}" in
-  init)       shift; cmd_init "$@" ;;
-  search)     shift; cmd_search "$@" ;;
-  status)     cmd_status ;;
-  doctor)     cmd_doctor ;;
-  align)      shift; cmd_align "$@" ;;
-  community)  shift; cmd_community "$@" ;;
-  sync)       cmd_sync ;;
-  publish)    shift; cmd_publish "$@" ;;
+  init)         shift; cmd_init "$@" ;;
+  search)       shift; cmd_search "$@" ;;
+  status)       cmd_status ;;
+  doctor)       cmd_doctor ;;
+  align)        shift; cmd_align "$@" ;;
+  community)    shift; cmd_community "$@" ;;
+  sync)         cmd_sync ;;
+  publish)      shift; cmd_publish "$@" ;;
+  device-sync)  shift; cmd_device_sync "$@" ;;
   help|--help|-h) cmd_help ;;
   --version|-v) echo "radioheader v$VERSION" ;;
   *)
