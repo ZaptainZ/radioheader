@@ -89,7 +89,7 @@ This provides a visible, session-start reminder that RadioHeader exists and how 
 
 **The problem**: If RadioHeader only works for projects that are manually configured, adoption stalls. Users set up their first few projects and then forget.
 
-**The fix**: A SessionStart hook that checks for `.claude/rules/memory-reflux.md` in the project root. If missing, it prompts: "This project has not configured the dynamic experience framework." Claude then asks the user if they want to enable it.
+**The fix**: A SessionStart hook that checks for `.claude/rules/memory-echo.md` in the project root. If missing, it prompts: "This project has not configured the dynamic experience framework." Claude then asks the user if they want to enable it.
 
 **Takeaway**: Passive detection + active prompting creates organic adoption without manual intervention.
 
@@ -105,7 +105,7 @@ This provides a visible, session-start reminder that RadioHeader exists and how 
 
 **The problem**: Over time, topic files accumulate outdated entries. Multiple entries describe the same problem with increasingly better solutions, but the old entries remain.
 
-**The fix**: The reflux rule explicitly states "Replace outdated information, don't append endlessly." When a better solution is found, the old entry is updated in place.
+**The fix**: The Echo rule explicitly states "Replace outdated information, don't append endlessly." When a better solution is found, the old entry is updated in place.
 
 **Takeaway**: Curation is more important than accumulation. A smaller, accurate knowledge base is more valuable than a larger one with stale entries.
 
@@ -117,6 +117,6 @@ This provides a visible, session-start reminder that RadioHeader exists and how 
 
 3. **Writing entries for machines**: Entries should be human-readable. They're consumed by an LLM that understands natural language — not parsed by a structured query engine.
 
-4. **Automating reflux completely**: The agent's judgment about "is this useful cross-project?" is critical. Fully automated extraction produces noise.
+4. **Automating Echo completely**: The agent's judgment about "is this useful cross-project?" is critical. Fully automated extraction produces noise.
 
 5. **Treating RadioHeader as documentation**: It's experience, not documentation. Docs describe how things should work. RadioHeader describes what actually happens when things don't work as documented.

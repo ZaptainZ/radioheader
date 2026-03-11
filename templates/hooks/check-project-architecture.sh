@@ -4,7 +4,7 @@
 # If not, prompt the agent to ask the user.
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
-MARKER_FILE="$PROJECT_DIR/.claude/rules/memory-reflux.md"
+MARKER_FILE="$PROJECT_DIR/.claude/rules/memory-echo.md"
 
 if [ ! -f "$MARKER_FILE" ]; then
   echo ""

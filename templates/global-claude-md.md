@@ -2,14 +2,14 @@
 # Do not manually edit this section. Managed by RadioHeader.
 # https://github.com/ZaptainZ/radioheader
 
-## Memory Reflux (All Projects) — MUST FOLLOW
+## Echo (All Projects) — MUST FOLLOW
 
 **After completing a task series (bug fix, feature, deployment, etc.), MUST perform ALL of the following:**
 
 1. Did this session produce new experience? (pitfalls, architecture decisions, non-obvious behavior)
 2. If yes → update the corresponding topic file under `memory/`
 3. Key experience → also update `memory/MEMORY.md` quick reference section
-4. **Global reflux**: Is this experience useful across projects? If yes → write to `__HOME__/.claude/radioheader/topics/` with format `[source:ProjectName] experience content`
+4. **Global Echo**: Is this experience useful across projects? If yes → write to `__HOME__/.claude/radioheader/topics/` with format `[source:ProjectName] experience content`
 5. **Replace outdated info, don't append endlessly**
 
 **Project documentation obligations (for projects with the dynamic experience framework):**
@@ -49,7 +49,7 @@ Use multiple synonymous keywords to increase hit rate (e.g. "white screen|slow l
 
 ## New Project Onboarding
 
-**When entering a project, check if `.claude/rules/memory-reflux.md` exists in the project root.**
+**When entering a project, check if `.claude/rules/memory-echo.md` exists in the project root.**
 
 ### If not found (new project)
 

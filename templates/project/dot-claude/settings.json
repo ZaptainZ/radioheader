@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo 'Memory reflux reminder: If you completed a task series, check if new experience should be written to memory/ topic files.'"
+            "command": "echo 'Echo reminder: If you completed a task series, check if new experience should echo back to memory/ topic files.'"
           }
         ]
       }

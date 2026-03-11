@@ -79,8 +79,8 @@ chmod +x "$HOOKS_DIR/radioheader-loader.sh"
 cp "$SCRIPT_DIR/templates/hooks/radioheader-memory-sync.sh" "$HOOKS_DIR/radioheader-memory-sync.sh"
 chmod +x "$HOOKS_DIR/radioheader-memory-sync.sh"
 
-cp "$SCRIPT_DIR/templates/hooks/radioheader-stop-reflux.sh" "$HOOKS_DIR/radioheader-stop-reflux.sh"
-chmod +x "$HOOKS_DIR/radioheader-stop-reflux.sh"
+cp "$SCRIPT_DIR/templates/hooks/radioheader-stop-echo.sh" "$HOOKS_DIR/radioheader-stop-echo.sh"
+chmod +x "$HOOKS_DIR/radioheader-stop-echo.sh"
 
 ok "Installed hook scripts (4 hooks)"
 
@@ -118,7 +118,7 @@ if [ -f "$SETTINGS_JSON" ]; then
   HAS_CHECK_HOOK=$(grep -c "check-project-architecture.sh" "$SETTINGS_JSON" 2>/dev/null || true)
   HAS_LOADER_HOOK=$(grep -c "radioheader-loader.sh" "$SETTINGS_JSON" 2>/dev/null || true)
   HAS_SYNC_HOOK=$(grep -c "radioheader-memory-sync.sh" "$SETTINGS_JSON" 2>/dev/null || true)
-  HAS_STOP_HOOK=$(grep -c "radioheader-stop-reflux.sh" "$SETTINGS_JSON" 2>/dev/null || true)
+  HAS_STOP_HOOK=$(grep -c "radioheader-stop-echo.sh" "$SETTINGS_JSON" 2>/dev/null || true)
 
   if [ "$HAS_CHECK_HOOK" -gt 0 ] && [ "$HAS_LOADER_HOOK" -gt 0 ] && [ "$HAS_SYNC_HOOK" -gt 0 ] && [ "$HAS_STOP_HOOK" -gt 0 ]; then
     ok "Hooks already configured in settings.json"
@@ -161,9 +161,9 @@ if [ -f "$SETTINGS_JSON" ]; then
         fi
       fi
 
-      # --- Stop hooks (reflux reminder) ---
+      # --- Stop hooks (Echo reminder) ---
       if [ "$HAS_STOP_HOOK" -eq 0 ]; then
-        STOP_HOOK='[{"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-stop-reflux.sh"}]}]'
+        STOP_HOOK='[{"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-stop-echo.sh"}]}]'
         if jq -e '.hooks.Stop' "$TEMP_JSON" &>/dev/null; then
           jq --argjson h "$STOP_HOOK" '.hooks.Stop += $h' "$TEMP_JSON" > "$TEMP_JSON.tmp" && mv "$TEMP_JSON.tmp" "$TEMP_JSON"
         else
@@ -186,7 +186,7 @@ if [ -f "$SETTINGS_JSON" ]; then
       {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-memory-sync.sh"}]}
     ],
     "Stop": [
-      {"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-stop-reflux.sh"}]}
+      {"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-stop-echo.sh"}]}
     ]
   }
 HOOKS_HELP
@@ -233,7 +233,7 @@ else
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/hooks/radioheader-stop-reflux.sh"
+            "command": "~/.claude/hooks/radioheader-stop-echo.sh"
           }
         ]
       }

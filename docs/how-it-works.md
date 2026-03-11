@@ -38,7 +38,7 @@ Each layer has a different scope and lifetime. RadioHeader occupies the top laye
 
 The core of RadioHeader. Appended between `# --- RadioHeader START ---` and `# --- RadioHeader END ---` markers. Contains:
 
-- Memory reflux rules (when and how to write experience back)
+- Echo rules (when and how to write experience back)
 - Three-step behavioral mandate (Search → Apply → Trace)
 - New project onboarding flow
 - Prohibition on finding but not using results
@@ -74,7 +74,7 @@ project/
 │   ├── hooks/
 │   │   └── load-project-rules.sh  # Startup message
 │   └── rules/
-│       ├── memory-reflux.md       # Dual reflux rules (project + global)
+│       ├── memory-echo.md       # Echo rules (project + global)
 │       ├── logs-writing.md        # Log writing rules
 │       └── information-lookup.md  # Five-step search strategy
 ├── CLAUDE.md                      # Project entry point
@@ -114,7 +114,7 @@ This three-step pattern was developed after discovering that Claude would search
 
 **Step 3 — Trace**: If more detail is needed, look up the source project in `project-registry.md` and read its `memory/` directory for full context.
 
-### Experience Reflux
+### Echo (Experience Flows Back)
 
 After completing a task series (bug fix, feature, deployment), the agent checks:
 
@@ -123,7 +123,7 @@ After completing a task series (bug fix, feature, deployment), the agent checks:
 3. Global-level: Is this useful across projects? If yes → write to RadioHeader topics with `[source:ProjectName]` tag
 4. Replace outdated entries, don't append endlessly
 
-The Stop hook provides a reminder: "Check if new experience should flow to memory/".
+The Stop hook provides a reminder: "Check if new experience should echo back to memory/".
 
 ## What RadioHeader Does NOT Do
 

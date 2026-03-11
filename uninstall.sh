@@ -54,9 +54,9 @@ if [ -f "$HOOKS_DIR/radioheader-memory-sync.sh" ]; then
   ok "Removed radioheader-memory-sync.sh"
 fi
 
-if [ -f "$HOOKS_DIR/radioheader-stop-reflux.sh" ]; then
-  rm "$HOOKS_DIR/radioheader-stop-reflux.sh"
-  ok "Removed radioheader-stop-reflux.sh"
+if [ -f "$HOOKS_DIR/radioheader-stop-echo.sh" ]; then
+  rm "$HOOKS_DIR/radioheader-stop-echo.sh"
+  ok "Removed radioheader-stop-echo.sh"
 fi
 
 # --- Step 3: Clean hooks from settings.json ---
@@ -89,7 +89,7 @@ if [ -f "$SETTINGS_JSON" ] && command -v jq &>/dev/null; then
     (if .hooks.Stop then
       .hooks.Stop |= map(
         select(
-          .hooks | all(.command | contains("radioheader-stop-reflux.sh") | not)
+          .hooks | all(.command | contains("radioheader-stop-echo.sh") | not)
         )
       )
     else . end)

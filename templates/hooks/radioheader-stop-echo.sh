@@ -2,7 +2,7 @@
 
 # RadioHeader: Stop hook
 # When Claude stops responding:
-#   1. Remind about reflux duties (for configured projects)
+#   1. Remind about Echo duties (for configured projects)
 #   2. Trigger community vote evaluation (if community enabled)
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
@@ -16,10 +16,10 @@ community_enabled() {
   [ -f "$CONFIG_FILE" ] && grep -q '"community".*true' "$CONFIG_FILE" 2>/dev/null
 }
 
-# Part 1: Reflux reminder (for configured projects)
-if [ -f "$PROJECT_DIR/.claude/rules/memory-reflux.md" ]; then
+# Part 1: Echo reminder (for configured projects)
+if [ -f "$PROJECT_DIR/.claude/rules/memory-echo.md" ]; then
   echo ""
-  echo "📝 Session reflux checklist:"
+  echo "📝 Session Echo checklist:"
   echo "   ① New experience → memory/ and radioheader/topics/"
   echo "   ② Project info changed → update project overview doc"
   echo "   ③ Major task completed → write to logs/"

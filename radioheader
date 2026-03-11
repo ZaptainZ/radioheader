@@ -199,8 +199,8 @@ EOF
   fi
 
   # Check if already initialized
-  if [ -f ".claude/rules/memory-reflux.md" ]; then
-    warn "This project appears to be already initialized (.claude/rules/memory-reflux.md exists)."
+  if [ -f ".claude/rules/memory-echo.md" ]; then
+    warn "This project appears to be already initialized (.claude/rules/memory-echo.md exists)."
     read -p "Re-initialize? Existing files will NOT be overwritten. [y/N] " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -288,7 +288,7 @@ EOF
   fi
 
   # .claude/rules/
-  local rules=("memory-reflux.md" "logs-writing.md" "information-lookup.md")
+  local rules=("memory-echo.md" "logs-writing.md" "information-lookup.md")
   for rule in "${rules[@]}"; do
     if [ -f ".claude/rules/$rule" ]; then
       warn ".claude/rules/$rule already exists, skipping"
@@ -344,7 +344,7 @@ EOF
   echo "  CLAUDE.md"
   echo "  .claude/settings.json"
   echo "  .claude/hooks/load-project-rules.sh"
-  echo "  .claude/rules/{memory-reflux,logs-writing,information-lookup}.md"
+  echo "  .claude/rules/{memory-echo,logs-writing,information-lookup}.md"
   echo "  $doc_dir/{00_AGENT_RULES,01_PROJECT_OVERVIEW}.md"
   echo "  $doc_dir/logs/"
   echo ""
@@ -574,7 +574,7 @@ cmd_status() {
     "check-project-architecture.sh"
     "radioheader-loader.sh"
     "radioheader-memory-sync.sh"
-    "radioheader-stop-reflux.sh"
+    "radioheader-stop-echo.sh"
   )
 
   local hooks_ok=0
@@ -638,7 +638,7 @@ cmd_doctor() {
     "check-project-architecture.sh"
     "radioheader-loader.sh"
     "radioheader-memory-sync.sh"
-    "radioheader-stop-reflux.sh"
+    "radioheader-stop-echo.sh"
   )
 
   for hook in "${hooks[@]}"; do

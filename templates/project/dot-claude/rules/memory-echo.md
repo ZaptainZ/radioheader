@@ -1,6 +1,6 @@
-# Memory Reflux Rules
+# Memory Echo Rules
 
-After completing a task series, the agent must check if new experience should be recorded.
+After completing a task series, the agent must check if new experience should echo back.
 
 ## When to Record
 - Fixed a bug (record root cause and correct approach)
@@ -9,11 +9,11 @@ After completing a task series, the agent must check if new experience should be
 
 ## Where to Write
 
-### Project-level reflux
+### Project-level Echo
 - Specific experience → topic files under `memory/`
 - Key experience → also update `MEMORY.md` quick reference section
 
-### Global reflux (cross-project experience)
+### Global Echo (cross-project experience)
 - Ask: Is this experience useful for other projects?
 - General technical experience → `__HOME__/.claude/radioheader/topics/` under the corresponding topic file
 - Format: `[source:ProjectName] experience content`
