@@ -810,13 +810,18 @@ cmd_doctor() {
 
   if [ -f "$REGISTRY" ]; then
     local stale=0
-    while IFS='|' read -r _ _ _ path _ _; do
+    while IFS='|' read -r _ _ _ path _ status _; do
       path=$(echo "$path" | xargs) # trim whitespace
+      status=$(echo "$status" | xargs) # trim whitespace
       # Remove surrounding backticks if present
       path="${path#\`}"
       path="${path%\`}"
       # Expand ~ to $HOME
       path="${path/#\~/$HOME}"
+      # Skip archived/inactive projects
+      if [[ "$status" == *"归档"* ]] || [[ "$status" == *"archive"* ]]; then
+        continue
+      fi
       if [ -n "$path" ] && [ "$path" != "Project Path" ] && [[ "$path" != -* ]] && [[ "$path" != *"add your"* ]] && [[ "$path" != *"项目"* ]]; then
         if [ ! -d "$path" ]; then
           echo -e "  ${YELLOW}!${NC} Stale project path: $path"
