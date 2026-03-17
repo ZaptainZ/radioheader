@@ -106,6 +106,8 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 
 ### 社区共享
 
+默认社区仓库是 [radioheader-community](https://github.com/ZaptainZ/radioheader-community)（可通过 `config.json` 指向自己的仓库）。
+
 开启社区后（`radioheader community on`），搜索结果同时包含本地和社区条目：
 
 ```

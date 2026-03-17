@@ -106,6 +106,8 @@ This makes RadioHeader an **information gateway** — the single entry point thr
 
 ### Community Sharing
 
+The default community repository is [radioheader-community](https://github.com/ZaptainZ/radioheader-community) (you can point to your own via `config.json`).
+
 When community is enabled (`radioheader community on`), search results include entries from the shared pool alongside your local ones:
 
 ```
