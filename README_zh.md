@@ -54,6 +54,8 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **搜 → 用 → 追** — 不是建议，是注入 CLAUDE.md 的强制行为规则。搜到相关经验就**必须引用并应用**，搜到不用是被明确禁止的。
 
+**Learn（外部知识采集）** — RadioHeader 不只靠踩坑积累经验。`learn` 命令从任意 URL 提取文章——包括微信公众号、Medium、Substack 等封闭平台——并提炼为短波条目。这让 RadioHeader 从被动的经验管理器升级为 Claude Code 的主动**信息入口**：不只记住教训，而是主动从外部世界吸收知识。
+
 **社区共享** — 可选的社区短波库。你的本地经验始终留在本地；发布时经过三关检查（质量评分 ≥6/8、隐私扫描、去重检查）才能进入共享池。质量治理采用 [Stigmergy（痕迹协作）](https://zh.wikipedia.org/wiki/%E5%8D%8F%E4%BD%9C%E6%80%A7) 模型——类似蚁群信息素：好条目通过使用被强化，差条目自然衰减。
 
 ## 快速开始
@@ -87,6 +89,20 @@ RadioHeader (~/.claude/radioheader/)
 三层这样接上：经验先通过 **Echo** 回到 **RadioHeader**，再由 **Shortwave** 去掉项目噪音，变成可广播的通用知识。
 
 之后在另一个项目中遇到类似问题，**搜→用→追** 规则启动：先搜 RadioHeader，引用并应用搜到的经验，需要更多细节时追溯到源项目。
+
+### Learn — 第二条知识通道
+
+Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
+
+```
+信息源                      RadioHeader               消费端
+─────────────────           ─────────────────         ─────────────────
+踩坑修复 (Echo) ─────────→                        ──→ search 命令
+外部文章 (learn) ────────→  topics/ + shortwave/  ──→ Agent 搜→用→追
+社区共享 (sync) ─────────→                        ──→ publish 投稿
+```
+
+这让 RadioHeader 成为一个**信息入口**——外部知识流入 Claude Code 工作记忆的统一入口。不是浏览器，不是书签管理器，而是一个能吸收、提炼、并在需要时精准供给知识的系统。
 
 ### 社区共享
 
@@ -122,6 +138,7 @@ RadioHeader (~/.claude/radioheader/)
 |------|------|
 | `radioheader init` | 在项目中初始化经验框架 |
 | `radioheader search <关键词>` | 搜索 topics、shortwave 和社区库 |
+| `radioheader learn <url>` | 提取网页文章并生成短波条目 |
 | `radioheader status` | 查看主题数、条目数、社区状态 |
 | `radioheader doctor` | 健康检查：hooks、规则、注册表 |
 | `radioheader align` | 分析 topics↔shortwave 覆盖率 |

@@ -4,7 +4,7 @@ set -e
 # RadioHeader CLI — Cross-project experience sharing for Claude Code
 # Usage: radioheader <command> [options]
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -118,6 +118,7 @@ ${BOLD}USAGE${NC}
 ${BOLD}COMMANDS${NC}
   init        Initialize dynamic experience framework in current project
   search      Search RadioHeader topics (local + community)
+  learn       Extract web article and generate shortwave entry
   status      Show RadioHeader status
   doctor      Run health checks
   align       Analyze topics↔shortwave coverage and batch refine
@@ -132,6 +133,8 @@ ${BOLD}EXAMPLES${NC}
   radioheader init --name "MyApp" --stack "iOS/SwiftUI"
   radioheader search "NavigationStack"
   radioheader search "white screen|slow launch"
+  radioheader learn https://example.com/article
+  radioheader learn https://mp.weixin.qq.com/s/xxx --topic ai-api-integration
   radioheader status
   radioheader doctor
   radioheader align
@@ -837,6 +840,38 @@ cmd_doctor() {
   else
     echo -e "  ${YELLOW}!${NC} project-registry.md not found"
     issues=$((issues + 1))
+  fi
+
+  # --- Optional: web-extract skill ---
+  echo ""
+  echo -e "${BOLD}Optional: web-extract Skill${NC}"
+
+  if [ -d "$CLAUDE_DIR/skills/web-extract" ]; then
+    echo -e "  ${GREEN}✓${NC} web-extract skill directory exists"
+    if [ -f "$CLAUDE_DIR/skills/web-extract/SKILL.md" ]; then
+      echo -e "  ${GREEN}✓${NC} SKILL.md present"
+    else
+      echo -e "  ${YELLOW}!${NC} SKILL.md missing"
+    fi
+    if [ -f "$CLAUDE_DIR/skills/web-extract/scrapling_fetch.py" ]; then
+      echo -e "  ${GREEN}✓${NC} scrapling_fetch.py present"
+    else
+      echo -e "  ${YELLOW}!${NC} scrapling_fetch.py missing"
+    fi
+    if [ -d "$CLAUDE_DIR/skills/web-extract/.venv" ]; then
+      if "$CLAUDE_DIR/skills/web-extract/.venv/bin/python3" -c "import scrapling, html2text" 2>/dev/null; then
+        echo -e "  ${GREEN}✓${NC} Python dependencies OK (scrapling, html2text)"
+      else
+        echo -e "  ${YELLOW}!${NC} Python dependencies incomplete — run: ~/.claude/skills/web-extract/.venv/bin/pip install scrapling html2text browserforge"
+      fi
+    else
+      echo -e "  ${YELLOW}!${NC} Python venv not set up"
+    fi
+    echo -e "  ${DIM}(Enables 'radioheader learn' and gives Claude Code better web fetching)${NC}"
+  else
+    echo -e "  ${DIM}–${NC} Not installed (optional — enables 'radioheader learn' command)"
+    echo -e "  ${DIM}  Install gives Claude Code the ability to read walled-garden articles${NC}"
+    echo -e "  ${DIM}  (WeChat, Medium, Substack) and save 60-70% tokens on web content.${NC}"
   fi
 
   # --- Summary ---
@@ -2083,12 +2118,264 @@ EOF
 }
 
 # ============================================================
+# learn — extract web article into shortwave
+# ============================================================
+
+WEBEXTRACT_DIR="$CLAUDE_DIR/skills/web-extract"
+WEBEXTRACT_VENV="$WEBEXTRACT_DIR/.venv"
+WEBEXTRACT_SCRIPT="$WEBEXTRACT_DIR/scrapling_fetch.py"
+
+cmd_learn() {
+  local url=""
+  local topic=""
+  local max_chars=30000
+
+  # Parse arguments
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --topic)  topic="$2"; shift 2 ;;
+      --max-chars) max_chars="$2"; shift 2 ;;
+      --help|-h)
+        cat <<LEARNHELP
+
+${BOLD}radioheader learn${NC} — Extract web article and generate shortwave entry
+
+${BOLD}USAGE${NC}
+  radioheader learn <url> [--topic <topic-name>]
+
+${BOLD}OPTIONS${NC}
+  --topic <name>    Also update the specified topic file in topics/
+  --max-chars <n>   Max characters to extract (default: 30000)
+
+${BOLD}EXAMPLES${NC}
+  radioheader learn https://example.com/article
+  radioheader learn https://mp.weixin.qq.com/s/xxx --topic ai-api-integration
+
+${BOLD}REQUIREMENTS${NC}
+  web-extract skill must be installed at ~/.claude/skills/web-extract/
+  Run 'radioheader doctor' to check status.
+
+${BOLD}WHAT THIS DOES${NC}
+  1. Extracts clean article text from any URL (3-tier: Jina → Scrapling → web_fetch)
+  2. Outputs the extracted markdown for Claude to distill into a shortwave entry
+  3. Claude decides if the content has value and writes the shortwave automatically
+
+  This gives RadioHeader a second knowledge channel: not just learning from mistakes
+  (Echo), but actively absorbing knowledge from external articles.
+
+LEARNHELP
+        return 0
+        ;;
+      -*)
+        err "Unknown option: $1"
+        return 1
+        ;;
+      *)
+        if [ -z "$url" ]; then
+          url="$1"
+        fi
+        shift
+        ;;
+    esac
+  done
+
+  if [ -z "$url" ]; then
+    err "Usage: radioheader learn <url> [--topic <topic-name>]"
+    echo "  Run 'radioheader learn --help' for details."
+    return 1
+  fi
+
+  # --- Check dependencies ---
+  if [ ! -d "$WEBEXTRACT_DIR" ]; then
+    echo ""
+    echo -e "${YELLOW}web-extract skill is not installed.${NC}"
+    echo ""
+    echo "  The 'learn' command needs the web-extract skill to fetch articles from any URL."
+    echo "  This skill also enhances Claude Code itself — giving it the ability to:"
+    echo ""
+    echo "    • Read articles from walled gardens (WeChat, Medium, Substack)"
+    echo "    • Extract clean text from any webpage, saving 60-70% tokens vs raw web_fetch"
+    echo "    • Bypass common anti-scraping measures (Cloudflare, bot detection)"
+    echo ""
+    echo "  To install:"
+    echo "    1. Create directory: mkdir -p ~/.claude/skills/web-extract"
+    echo "    2. Copy SKILL.md and scrapling_fetch.py from the RadioHeader repo:"
+    echo "       cp radioheader/templates/skills/web-extract/* ~/.claude/skills/web-extract/"
+    echo "    3. Set up Python venv:"
+    echo "       python3 -m venv ~/.claude/skills/web-extract/.venv"
+    echo "       ~/.claude/skills/web-extract/.venv/bin/pip install scrapling html2text browserforge"
+    echo ""
+    return 1
+  fi
+
+  if [ ! -f "$WEBEXTRACT_SCRIPT" ]; then
+    err "scrapling_fetch.py not found at $WEBEXTRACT_SCRIPT"
+    echo "  Reinstall the web-extract skill."
+    return 1
+  fi
+
+  if [ ! -d "$WEBEXTRACT_VENV" ]; then
+    echo ""
+    echo -e "${YELLOW}Python venv not found for web-extract skill.${NC}"
+    echo ""
+    echo "  Set up the venv:"
+    echo "    python3 -m venv ~/.claude/skills/web-extract/.venv"
+    echo "    ~/.claude/skills/web-extract/.venv/bin/pip install scrapling html2text browserforge"
+    echo ""
+    return 1
+  fi
+
+  # --- Determine extraction strategy based on domain ---
+  local strategy="auto"
+  local domain=""
+  domain=$(echo "$url" | sed 's|https\{0,1\}://||' | sed 's|/.*||' | sed 's|www\.||')
+
+  case "$domain" in
+    mp.weixin.qq.com)
+      strategy="scrapling"
+      info "WeChat article detected → using Scrapling directly (Jina gets 403)"
+      ;;
+    github.com|raw.githubusercontent.com)
+      strategy="webfetch"
+      info "GitHub URL → web_fetch is sufficient"
+      ;;
+    *.readthedocs.io)
+      strategy="webfetch"
+      info "Docs site → web_fetch is sufficient"
+      ;;
+    *)
+      info "Trying Jina Reader first, with Scrapling fallback"
+      ;;
+  esac
+
+  echo ""
+
+  # --- Tier 1: Jina Reader (unless domain-routed elsewhere) ---
+  local content=""
+  local tier_used=""
+  local extract_ok=false
+
+  if [ "$strategy" = "auto" ] || [ "$strategy" = "jina" ]; then
+    info "Tier 1: Jina Reader..."
+    local jina_url="https://r.jina.ai/$url"
+    # Use curl to fetch Jina (simpler than requiring web_fetch tool)
+    content=$(curl -sL --max-time 15 -H "Accept: text/markdown" "$jina_url" 2>/dev/null | head -c "$max_chars")
+
+    if [ -n "$content" ] && [ "${#content}" -gt 100 ]; then
+      # Check for common failure patterns
+      if echo "$content" | grep -qi "环境异常\|403 Forbidden\|Access Denied\|Rate limit\|404 Not Found\|returned error"; then
+        warn "Jina returned error/block page, falling back..."
+        content=""
+      elif [ "${#content}" -lt 200 ]; then
+        warn "Jina returned too little content (${#content} chars), falling back..."
+        content=""
+      else
+        tier_used="jina"
+        extract_ok=true
+      fi
+    fi
+  fi
+
+  # --- Tier 2: Scrapling ---
+  if [ "$extract_ok" = false ] && [ "$strategy" != "webfetch" ]; then
+    info "Tier 2: Scrapling + html2text..."
+    local scrapling_result
+    scrapling_result=$("$WEBEXTRACT_VENV/bin/python3" "$WEBEXTRACT_SCRIPT" "$url" "$max_chars" 2>/dev/null)
+
+    # Parse JSON result
+    local scrapling_ok
+    scrapling_ok=$(echo "$scrapling_result" | python3 -c "import sys,json; d=json.load(sys.stdin); print('true' if d.get('ok') else 'false')" 2>/dev/null || echo "false")
+
+    if [ "$scrapling_ok" = "true" ]; then
+      content=$(echo "$scrapling_result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('content',''))" 2>/dev/null)
+      tier_used=$(echo "$scrapling_result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('mode','scrapling'))" 2>/dev/null)
+      extract_ok=true
+    else
+      local scrapling_err
+      scrapling_err=$(echo "$scrapling_result" | python3 -c "import sys,json; print(json.load(sys.stdin).get('error','unknown'))" 2>/dev/null || echo "extraction failed")
+      warn "Scrapling failed: $scrapling_err"
+    fi
+  fi
+
+  # --- Tier 3: curl fallback (simple text extraction) ---
+  if [ "$extract_ok" = false ]; then
+    info "Tier 3: curl direct fetch (noisy, full-page)..."
+    content=$(curl -sL --max-time 15 "$url" 2>/dev/null | python3 -c "
+import sys, html, re
+raw = sys.stdin.read()
+# Strip HTML tags, decode entities
+text = re.sub(r'<script[^>]*>.*?</script>', '', raw, flags=re.DOTALL)
+text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL)
+text = re.sub(r'<[^>]+>', ' ', text)
+text = html.unescape(text)
+text = re.sub(r'\s+', ' ', text).strip()
+print(text[:$max_chars])
+" 2>/dev/null)
+
+    if [ -n "$content" ] && [ "${#content}" -gt 100 ]; then
+      tier_used="curl-fallback"
+      extract_ok=true
+    fi
+  fi
+
+  if [ "$extract_ok" = false ]; then
+    err "All three tiers failed to extract content from: $url"
+    echo "  Try opening the URL in a browser and pasting the content manually."
+    return 1
+  fi
+
+  # --- Output for Claude to process ---
+  local char_count="${#content}"
+  ok "Extracted ${char_count} characters using: ${tier_used}"
+  echo ""
+
+  # Write extracted content to a temp file for Claude to read
+  local tmpfile
+  tmpfile=$(mktemp /tmp/radioheader-learn-XXXXXX)
+  mv "$tmpfile" "${tmpfile}.md"
+  tmpfile="${tmpfile}.md"
+  cat > "$tmpfile" <<EXTRACTHEADER
+# Web Article Extraction
+
+- **URL**: $url
+- **Extraction tier**: $tier_used
+- **Characters**: $char_count
+- **Topic hint**: ${topic:-"(auto-detect)"}
+
+---
+
+EXTRACTHEADER
+  echo "$content" >> "$tmpfile"
+
+  echo -e "${BOLD}Extracted content saved to:${NC} $tmpfile"
+  echo ""
+
+  if [ -n "$topic" ]; then
+    echo -e "${DIM}Topic hint: $topic — Claude will update topics/$topic.md if relevant${NC}"
+  fi
+
+  echo ""
+  echo -e "${BOLD}Next step:${NC} In Claude Code, tell Claude:"
+  echo ""
+  echo -e "  ${CYAN}Read $tmpfile and distill valuable experience into a RadioHeader shortwave.${NC}"
+  echo -e "  ${CYAN}Follow shortwave-spec format. Source tag: [来源:URL]${NC}"
+  if [ -n "$topic" ]; then
+    echo -e "  ${CYAN}Also update topics/$topic.md if applicable.${NC}"
+  fi
+  echo ""
+  echo -e "${DIM}Claude will judge whether the content has shortwave-worthy experience.${NC}"
+  echo -e "${DIM}If not, it will say so — no user confirmation needed.${NC}"
+  echo ""
+}
+
+# ============================================================
 # Main — subcommand routing
 # ============================================================
 
 case "${1:-help}" in
   init)         shift; cmd_init "$@" ;;
   search)       shift; cmd_search "$@" ;;
+  learn)        shift; cmd_learn "$@" ;;
   status)       cmd_status ;;
   doctor)       cmd_doctor ;;
   align)        shift; cmd_align "$@" ;;

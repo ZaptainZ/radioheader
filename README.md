@@ -54,6 +54,8 @@ From the second time onward, the same class of problem goes from minutes to seco
 
 **Search → Apply → Trace** — Not a suggestion, a mandatory behavioral rule injected into CLAUDE.md. When Claude finds relevant experience, it **must** cite and apply it. Finding experience but ignoring it is explicitly prohibited.
 
+**Learn (External Knowledge)** — RadioHeader isn't limited to lessons learned the hard way. The `learn` command extracts articles from any URL — including walled gardens like WeChat Official Accounts, Medium, and Substack — and distills them into shortwave entries. This turns RadioHeader from a passive experience manager into an active **information gateway** for Claude Code: not just remembering mistakes, but actively absorbing knowledge from the outside world.
+
 **Community Sharing** — Opt-in community shortwave library. Your local experience stays local; when you choose to publish, entries pass three gates (quality score ≥6/8, privacy scan, dedup check) before reaching the shared pool. Quality follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigmergy) model — like ant pheromone trails: good entries get reinforced through usage, bad entries decay naturally.
 
 ## Quick Start
@@ -87,6 +89,20 @@ When you solve a bug, Claude records it in the project's memory. A PostToolUse h
 The three layers connect like this: experience flows back to **RadioHeader** via **Echo**, then **Shortwave** strips project noise and turns it into reusable knowledge that can be broadcast across all projects.
 
 Later, in a different project, Claude hits a similar issue. The **Search → Apply → Trace** rule kicks in: search RadioHeader first, cite and apply what's found, trace back to the source project if more detail is needed.
+
+### Learn — The Second Channel
+
+Echo captures experience from mistakes. `learn` captures knowledge from articles:
+
+```
+Sources                     RadioHeader               Consumers
+─────────────────           ─────────────────         ─────────────────
+Bug fixes (Echo) ────────→                        ──→ search command
+Web articles (learn) ────→  topics/ + shortwave/  ──→ Agent Search→Apply→Trace
+Community (sync) ────────→                        ──→ publish to community
+```
+
+This makes RadioHeader an **information gateway** — the single entry point through which external knowledge flows into Claude Code's working memory. Not a browser, not a bookmark manager — a system that absorbs, distills, and serves knowledge exactly when it's needed.
 
 ### Community Sharing
 
@@ -122,6 +138,7 @@ This is useful after a long session, when you finish a feature, or whenever you 
 |---------|-------------|
 | `radioheader init` | Initialize the experience framework in your project |
 | `radioheader search <query>` | Search across all topics, shortwave, and community |
+| `radioheader learn <url>` | Extract web article and generate shortwave entry |
 | `radioheader status` | Show topic count, entry count, community status |
 | `radioheader doctor` | Run health checks on hooks, rules, and registry |
 | `radioheader align` | Analyze topics↔shortwave coverage |
