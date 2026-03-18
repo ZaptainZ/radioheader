@@ -141,6 +141,7 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 | `radioheader init` | 在项目中初始化经验框架 |
 | `radioheader search <关键词>` | 搜索 topics、shortwave 和社区库 |
 | `radioheader learn <url>` | 提取网页文章并生成短波条目 |
+| `radioheader upgrade` | 将已注册项目升级到最新模板 |
 | `radioheader status` | 查看主题数、条目数、社区状态 |
 | `radioheader doctor` | 健康检查：hooks、规则、注册表 |
 | `radioheader align` | 分析 topics↔shortwave 覆盖率 |

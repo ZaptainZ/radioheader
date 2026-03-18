@@ -119,6 +119,7 @@ ${BOLD}COMMANDS${NC}
   init        Initialize dynamic experience framework in current project
   search      Search RadioHeader topics (local + community)
   learn       Extract web article and generate shortwave entry
+  upgrade     Upgrade registered projects to latest templates
   status      Show RadioHeader status
   doctor      Run health checks
   align       Analyze topics↔shortwave coverage and batch refine
@@ -135,6 +136,8 @@ ${BOLD}EXAMPLES${NC}
   radioheader search "white screen|slow launch"
   radioheader learn https://example.com/article
   radioheader learn https://mp.weixin.qq.com/s/xxx --topic ai-api-integration
+  radioheader upgrade
+  radioheader upgrade MyApp --dry-run
   radioheader status
   radioheader doctor
   radioheader align
@@ -2118,6 +2121,265 @@ EOF
 }
 
 # ============================================================
+# upgrade — upgrade registered projects to latest templates
+# ============================================================
+
+# Known renames: old_name → new_name
+# Add entries here when files are renamed in future versions
+UPGRADE_RENAMES="memory-reflux.md:memory-echo.md"
+
+cmd_upgrade() {
+  local target="all"
+  local dry_run=false
+
+  # Parse flags
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --dry-run) dry_run=true; shift ;;
+      --help|-h)
+        cat <<UPGRADEHELP
+
+${BOLD}radioheader upgrade${NC} — Upgrade registered projects to latest templates
+
+${BOLD}USAGE${NC}
+  radioheader upgrade [project-name|all] [--dry-run]
+
+${BOLD}OPTIONS${NC}
+  project-name    Upgrade a specific project (by name in registry)
+  all             Upgrade all registered projects (default)
+  --dry-run       Show what would change without modifying files
+
+${BOLD}WHAT IT DOES${NC}
+  1. Renames outdated files (e.g. memory-reflux.md → memory-echo.md)
+  2. Adds missing rule files from current templates
+  3. Updates file contents with latest template (preserves __HOME__ etc.)
+  4. Reports changes per project
+
+${BOLD}EXAMPLES${NC}
+  radioheader upgrade                  # Upgrade all projects
+  radioheader upgrade MyApp            # Upgrade one project
+  radioheader upgrade --dry-run        # Preview changes
+
+UPGRADEHELP
+        return 0
+        ;;
+      -*)
+        err "Unknown option: $1"
+        return 1
+        ;;
+      *)
+        target="$1"; shift
+        ;;
+    esac
+  done
+
+  if [ ! -f "$REGISTRY" ]; then
+    err "project-registry.md not found. No projects to upgrade."
+    return 1
+  fi
+
+  if [ ! -d "$TEMPLATES_DIR" ]; then
+    err "Templates not found at $TEMPLATES_DIR. Re-run install.sh."
+    return 1
+  fi
+
+  echo ""
+  echo -e "${BOLD}RadioHeader Upgrade${NC} (v${VERSION})"
+  if [ "$dry_run" = true ]; then
+    echo -e "${YELLOW}  DRY RUN — no files will be modified${NC}"
+  fi
+  echo ""
+
+  # --- Step 0: Sync templates from repo if available ---
+  local script_path
+  script_path=$(cd "$(dirname "$0")" && pwd)
+  local repo_templates="$script_path/templates/project"
+  if [ -d "$repo_templates/dot-claude/rules" ]; then
+    local synced=0
+    # Sync rule templates
+    for tmpl in "$repo_templates/dot-claude/rules"/*.md; do
+      local fname
+      fname=$(basename "$tmpl")
+      if [ ! -f "$TEMPLATES_DIR/dot-claude/rules/$fname" ] || ! diff -q "$tmpl" "$TEMPLATES_DIR/dot-claude/rules/$fname" >/dev/null 2>&1; then
+        if [ "$dry_run" = true ]; then
+          echo -e "  ${YELLOW}↻${NC} Would sync template: rules/$fname"
+        else
+          mkdir -p "$TEMPLATES_DIR/dot-claude/rules"
+          cp "$tmpl" "$TEMPLATES_DIR/dot-claude/rules/$fname"
+        fi
+        synced=$((synced + 1))
+      fi
+    done
+    # Remove templates that no longer exist in repo
+    if [ -d "$TEMPLATES_DIR/dot-claude/rules" ]; then
+      for installed in "$TEMPLATES_DIR/dot-claude/rules"/*.md; do
+        local fname
+        fname=$(basename "$installed")
+        if [ ! -f "$repo_templates/dot-claude/rules/$fname" ]; then
+          if [ "$dry_run" = true ]; then
+            echo -e "  ${YELLOW}✗${NC} Would remove obsolete template: rules/$fname"
+          else
+            rm "$installed"
+          fi
+          synced=$((synced + 1))
+        fi
+      done
+    fi
+    if [ "$synced" -gt 0 ]; then
+      if [ "$dry_run" = false ]; then
+        ok "Synced $synced template(s) from repo"
+      fi
+    else
+      echo -e "  ${GREEN}✓${NC} Templates already up to date"
+    fi
+    echo ""
+  fi
+
+  local total_projects=0
+  local upgraded_projects=0
+  local total_changes=0
+
+  # Read registry and process each project
+  while IFS='|' read -r _ pname _ ppath _ _ _; do
+    # Skip header/separator lines
+    pname=$(echo "$pname" | xargs 2>/dev/null) || continue
+    ppath=$(echo "$ppath" | xargs 2>/dev/null | sed 's/`//g' | sed "s|^~/|$HOME/|") || continue
+
+    [ -z "$pname" ] && continue
+    [ -z "$ppath" ] && continue
+    echo "$pname" | grep -q "^-" && continue
+    echo "$pname" | grep -qi "项目名\|project" && continue
+
+    # Filter by target
+    if [ "$target" != "all" ] && [ "$pname" != "$target" ]; then
+      continue
+    fi
+
+    # Check if project path exists
+    if [ ! -d "$ppath" ]; then
+      echo -e "  ${DIM}⏭ $pname — path not found, skipping${NC}"
+      continue
+    fi
+
+    # Check if project has .claude/rules/
+    local rules_dir="$ppath/.claude/rules"
+    if [ ! -d "$rules_dir" ]; then
+      echo -e "  ${DIM}⏭ $pname — no .claude/rules/, not an initialized project${NC}"
+      continue
+    fi
+
+    total_projects=$((total_projects + 1))
+    local project_changes=0
+
+    echo -e "  ${BOLD}$pname${NC} ($ppath)"
+
+    # --- Step 1: Handle renames ---
+    local rename_entry
+    for rename_entry in $UPGRADE_RENAMES; do
+      local old_name="${rename_entry%%:*}"
+      local new_name="${rename_entry##*:}"
+      if [ -f "$rules_dir/$old_name" ] && [ ! -f "$rules_dir/$new_name" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}→${NC} Would rename: $old_name → $new_name"
+        else
+          mv "$rules_dir/$old_name" "$rules_dir/$new_name"
+          echo -e "    ${GREEN}✓${NC} Renamed: $old_name → $new_name"
+        fi
+        project_changes=$((project_changes + 1))
+      fi
+    done
+
+    # --- Step 2: Add missing rule files ---
+    local template_rules_dir="$TEMPLATES_DIR/dot-claude/rules"
+    if [ -d "$template_rules_dir" ]; then
+      for tmpl_file in "$template_rules_dir"/*.md; do
+        local fname
+        fname=$(basename "$tmpl_file")
+        if [ ! -f "$rules_dir/$fname" ]; then
+          if [ "$dry_run" = true ]; then
+            echo -e "    ${YELLOW}+${NC} Would add missing: $fname"
+          else
+            cp "$tmpl_file" "$rules_dir/$fname"
+            sedi "s|__HOME__|$HOME|g" "$rules_dir/$fname"
+            echo -e "    ${GREEN}+${NC} Added missing: $fname"
+          fi
+          project_changes=$((project_changes + 1))
+        fi
+      done
+    fi
+
+    # --- Step 3: Update rule file contents (only if template is newer) ---
+    for rule_file in "$rules_dir"/*.md; do
+      local fname
+      fname=$(basename "$rule_file")
+      local tmpl="$template_rules_dir/$fname"
+      if [ -f "$tmpl" ]; then
+        # Generate what the current template would look like with HOME expanded
+        local expected
+        expected=$(sed "s|__HOME__|$HOME|g" "$tmpl")
+        local actual
+        actual=$(cat "$rule_file")
+        if [ "$expected" != "$actual" ]; then
+          if [ "$dry_run" = true ]; then
+            echo -e "    ${YELLOW}↻${NC} Would update content: $fname"
+          else
+            cp "$tmpl" "$rule_file"
+            sedi "s|__HOME__|$HOME|g" "$rule_file"
+            echo -e "    ${GREEN}↻${NC} Updated content: $fname"
+          fi
+          project_changes=$((project_changes + 1))
+        fi
+      fi
+    done
+
+    # --- Step 4: Check .claude/hooks ---
+    local hooks_dir="$ppath/.claude/hooks"
+    if [ -d "$hooks_dir" ] && [ -d "$TEMPLATES_DIR/dot-claude/hooks" ]; then
+      for tmpl_hook in "$TEMPLATES_DIR/dot-claude/hooks"/*.sh; do
+        local hname
+        hname=$(basename "$tmpl_hook")
+        if [ ! -f "$hooks_dir/$hname" ]; then
+          if [ "$dry_run" = true ]; then
+            echo -e "    ${YELLOW}+${NC} Would add missing hook: $hname"
+          else
+            cp "$tmpl_hook" "$hooks_dir/$hname"
+            chmod +x "$hooks_dir/$hname"
+            echo -e "    ${GREEN}+${NC} Added missing hook: $hname"
+          fi
+          project_changes=$((project_changes + 1))
+        fi
+      done
+    fi
+
+    if [ "$project_changes" -eq 0 ]; then
+      echo -e "    ${GREEN}✓${NC} Already up to date"
+    else
+      upgraded_projects=$((upgraded_projects + 1))
+      total_changes=$((total_changes + project_changes))
+    fi
+
+  done < "$REGISTRY"
+
+  # --- Summary ---
+  echo ""
+  if [ "$total_projects" -eq 0 ]; then
+    if [ "$target" = "all" ]; then
+      warn "No initialized projects found in registry."
+    else
+      err "Project '$target' not found in registry."
+    fi
+  elif [ "$dry_run" = true ]; then
+    echo -e "${BOLD}Dry run complete:${NC} $total_changes change(s) across $upgraded_projects of $total_projects project(s)"
+    echo -e "${DIM}Run without --dry-run to apply.${NC}"
+  elif [ "$total_changes" -eq 0 ]; then
+    echo -e "${GREEN}All $total_projects project(s) are up to date.${NC}"
+  else
+    echo -e "${GREEN}Upgraded $upgraded_projects project(s) with $total_changes change(s).${NC}"
+  fi
+  echo ""
+}
+
+# ============================================================
 # learn — extract web article into shortwave
 # ============================================================
 
@@ -2376,6 +2638,7 @@ case "${1:-help}" in
   init)         shift; cmd_init "$@" ;;
   search)       shift; cmd_search "$@" ;;
   learn)        shift; cmd_learn "$@" ;;
+  upgrade)      shift; cmd_upgrade "$@" ;;
   status)       cmd_status ;;
   doctor)       cmd_doctor ;;
   align)        shift; cmd_align "$@" ;;

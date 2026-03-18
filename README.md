@@ -141,6 +141,7 @@ This is useful after a long session, when you finish a feature, or whenever you 
 | `radioheader init` | Initialize the experience framework in your project |
 | `radioheader search <query>` | Search across all topics, shortwave, and community |
 | `radioheader learn <url>` | Extract web article and generate shortwave entry |
+| `radioheader upgrade` | Upgrade all registered projects to latest templates |
 | `radioheader status` | Show topic count, entry count, community status |
 | `radioheader doctor` | Run health checks on hooks, rules, and registry |
 | `radioheader align` | Analyze topics↔shortwave coverage |
