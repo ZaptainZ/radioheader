@@ -56,6 +56,10 @@ From the second time onward, the same class of problem goes from minutes to seco
 
 **Learn (External Knowledge)** — RadioHeader isn't limited to lessons learned the hard way. The `learn` command extracts articles from any URL — including walled gardens like WeChat Official Accounts, Medium, and Substack — and distills them into shortwave entries. This turns RadioHeader from a passive experience manager into an active **information gateway** for Claude Code: not just remembering mistakes, but actively absorbing knowledge from the outside world.
 
+**Context Digest (Attention-Compressed Awareness)** — Inspired by [Kimi's Attention Residuals](https://github.com/MoonshotAI/Attention-Residuals) research, RadioHeader builds a compressed environmental awareness profile that gets injected at session start. Instead of weighting search results (which adds little value when content matching already works), the attention mechanism operates at the **memory consolidation** level — like sleep consolidation in human memory. Every few memory syncs, `consolidate` automatically runs and produces a `context-digest.md` containing: user traits (problem-solving style, strengths, known weaknesses), a full project landscape (what each project does, current pain points, activity level), recent search patterns, and cross-project technology overlaps. The Agent starts every session already knowing who it's helping — not just what code it's looking at.
+
+**User Profile (Three Dimensions)** — RadioHeader maintains a user model across three dimensions: (1) **What you've done** — project portfolio with domains, problems, and pain points tracked in `project-registry.json`; (2) **How you work** — problem-solving style, interaction preferences, known strengths and weaknesses; (3) **What you have** — devices, network access, infrastructure. This profile serves as the "query vector" for memory consolidation — it determines what gets emphasized, what gets connected, and what the Agent should proactively watch for.
+
 **Community Sharing** — Opt-in community shortwave library. Your local experience stays local; when you choose to publish, entries pass three gates (quality score ≥6/8, privacy scan, dedup check) before reaching the shared pool. Quality follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigmergy) model — like ant pheromone trails: good entries get reinforced through usage, bad entries decay naturally.
 
 ## Quick Start
@@ -74,14 +78,17 @@ Optionally, run `radioheader init` inside a project to add per-project scaffoldi
 
 ```
 RadioHeader (~/.claude/radioheader/)
-├── shortwave/   ← refined, project-agnostic knowledge (Shortwave)
-├── topics/      ← detailed experience with [source:] tags
-└── INDEX.md     ← master index
+├── shortwave/            ← refined, project-agnostic knowledge
+├── topics/               ← detailed experience with [source:] tags
+├── project-registry.json ← project cards (domains, problems, pain points)
+├── user-profile.md       ← user traits (work style, resources)
+├── context-digest.md     ← attention-compressed awareness (auto-generated)
+└── INDEX.md              ← master index
 
-    ▲ Echo   ║ search
-    ║        ▼
-
-Project A memory/    Project B memory/    Project N memory/
+    ▲ Echo        ║ search      consolidate ──→ context-digest.md
+    ║             ▼                                    ║
+                                                       ▼
+Project A memory/    Project B memory/    SessionStart (injected)
 ```
 
 When you solve a bug, Claude records it in the project's memory. A PostToolUse hook fires and prompts Claude to check: *is this useful cross-project?* If yes, it flows up to `topics/` with a `[source:ProjectName]` tag, then gets distilled into a `shortwave/` entry.
@@ -100,9 +107,32 @@ Sources                     RadioHeader               Consumers
 Bug fixes (Echo) ────────→                        ──→ search command
 Web articles (learn) ────→  topics/ + shortwave/  ──→ Agent Search→Apply→Trace
 Community (sync) ────────→                        ──→ publish to community
+User behavior ───────────→  consolidate           ──→ context-digest (SessionStart)
 ```
 
 This makes RadioHeader an **information gateway** — the single entry point through which external knowledge flows into Claude Code's working memory. Not a browser, not a bookmark manager — a system that absorbs, distills, and serves knowledge exactly when it's needed.
+
+### Consolidate — Memory During Sleep
+
+Human memory compresses during sleep: episodes fade, but patterns and skills solidify. RadioHeader's `consolidate` command does the same:
+
+```
+Memory syncs accumulate → every 5 syncs, consolidate runs automatically
+                                    ↓
+                  Analyzes search logs + project activity + user profile
+                                    ↓
+                  Generates context-digest.md (compressed awareness)
+                                    ↓
+                  Next session: Agent starts with full environmental context
+```
+
+The context digest tells the Agent, before any code is read:
+- **Who it's helping** — problem-solving style, strengths, known weaknesses
+- **What they're working on** — 12 projects with their domains, pain points, activity levels
+- **What they've been searching** — recent focus areas and hot topics
+- **Where technologies overlap** — which skills transfer across projects
+
+This is not search optimization — it's **Agent calibration**. The difference: without the digest, the Agent treats every user the same. With it, the Agent knows this user tends toward greedy initialization on startup paths, has weak schema migration testing habits, and is currently focused on search quality improvements. That context shapes every recommendation.
 
 ### Community Sharing
 
@@ -140,7 +170,9 @@ This is useful after a long session, when you finish a feature, or whenever you 
 |---------|-------------|
 | `radioheader init` | Initialize the experience framework in your project |
 | `radioheader search <query>` | Search across all topics, shortwave, and community |
+| `radioheader index [--rebuild]` | Build/update FTS5 search index (BM25 + synonyms) |
 | `radioheader learn <url>` | Extract web article and generate shortwave entry |
+| `radioheader consolidate` | Update project weights and generate context digest |
 | `radioheader upgrade` | Upgrade all registered projects to latest templates |
 | `radioheader status` | Show topic count, entry count, community status |
 | `radioheader doctor` | Run health checks on hooks, rules, and registry |
@@ -151,6 +183,7 @@ This is useful after a long session, when you finish a feature, or whenever you 
 | `radioheader sync` | Pull latest community library + push votes/entries |
 | `radioheader publish <file>` | Publish a shortwave to community (3-gate check) |
 | `radioheader publish --auto-detect` | Scan all local shortwave for publishable entries |
+| `radioheader vote <id> [+1\|-1]` | Vote on a shortwave entry |
 | `radioheader device-sync init <url>` | Set up cross-device sync via git |
 | `radioheader device-sync push\|pull` | Push/pull RadioHeader data between devices |
 
@@ -175,6 +208,8 @@ Built through real usage across 13 projects. Three lessons that shaped everythin
 **Symptom keywords > solution keywords.** Developers search "white screen" and "slow launch", not "Task.detached". Stripping symptom keywords from entries makes them unfindable. Every entry must preserve the words someone would actually search for.
 
 **Instructions beat knowledge.** Writing "experience is stored here" doesn't drive behavior. Writing "you MUST search here first" does. CLAUDE.md content must be imperative behavioral rules, not reference documentation.
+
+**Attention belongs in compression, not retrieval.** We initially applied attention weights to search results (boosting entries from active projects). Testing showed zero meaningful ranking changes — BM25 content matching already gets the right results. The real value of attention is in memory consolidation: compressing the user's project landscape, behavioral patterns, and known weaknesses into a digest that shapes how the Agent thinks, not what it finds.
 
 See [docs/lessons-learned.md](docs/lessons-learned.md) for the full list.
 

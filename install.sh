@@ -59,6 +59,44 @@ if [ ! -f "$RADIOHEADER_DIR/project-registry.md" ]; then
   ok "Created project-registry.md"
 fi
 
+if [ ! -f "$RADIOHEADER_DIR/project-registry.json" ]; then
+  if [ -f "$SCRIPT_DIR/templates/radioheader/project-registry.json" ]; then
+    cp "$SCRIPT_DIR/templates/radioheader/project-registry.json" "$RADIOHEADER_DIR/project-registry.json"
+  else
+    python3 -c "
+import json
+data = {'version': 1, 'projects': [], 'domain_index': {}}
+with open('$RADIOHEADER_DIR/project-registry.json', 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+"
+  fi
+  ok "Created project-registry.json"
+fi
+
+if [ ! -f "$RADIOHEADER_DIR/user-profile.md" ]; then
+  cat > "$RADIOHEADER_DIR/user-profile.md" <<'PROFILE'
+# 用户画像
+
+> RadioHeader 注意力记忆架构的查询向量组成部分。
+> 维度 1（用户做过什么）由 project-registry.json 承载。
+
+## 工作方式（维度 2）
+
+- problem_solving:
+- interaction_style:
+- strengths:
+- weaknesses:
+
+## 资源（维度 3）
+
+- devices:
+- network:
+- accounts:
+PROFILE
+  ok "Created user-profile.md (fill in your details)"
+fi
+
 # --- Step 1.5: Copy project templates ---
 
 TEMPLATE_DEST="$RADIOHEADER_DIR/templates/project"
@@ -276,6 +314,40 @@ if [ -z "$CLI_INSTALLED" ]; then
   fi
 fi
 
+# --- Step 5.5: Auto-initialize (index + consolidate) ---
+
+echo ""
+info "Running post-install initialization..."
+
+# Copy Python scripts alongside CLI
+for pyfile in fts-index.py fts-search.py attn-consolidate.py; do
+  if [ -f "$SCRIPT_DIR/$pyfile" ]; then
+    cp "$SCRIPT_DIR/$pyfile" "$(dirname "$CLI_INSTALLED")/$pyfile"
+  fi
+done
+
+# Build FTS5 search index (if shortwave/topics exist)
+if command -v radioheader &>/dev/null || [ -n "$CLI_INSTALLED" ]; then
+  SW_COUNT=$(ls "$RADIOHEADER_DIR/shortwave/"*.md 2>/dev/null | wc -l | tr -d ' ')
+  TOPIC_COUNT=$(ls "$RADIOHEADER_DIR/topics/"*.md 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$((SW_COUNT + TOPIC_COUNT))" -gt 0 ]; then
+    info "Building search index..."
+    if "$CLI_INSTALLED" index --rebuild >/dev/null 2>&1; then
+      ok "Search index built ($((SW_COUNT + TOPIC_COUNT)) source files)"
+    else
+      warn "Search index build skipped (run 'radioheader index' manually)"
+    fi
+  fi
+
+  # Run consolidate to generate context-digest
+  info "Generating context digest..."
+  if "$CLI_INSTALLED" consolidate >/dev/null 2>&1; then
+    ok "Context digest generated"
+  else
+    warn "Context digest skipped (run 'radioheader consolidate' manually)"
+  fi
+fi
+
 # --- Step 6: Community toggle ---
 
 CONFIG_FILE="$RADIOHEADER_DIR/config.json"
@@ -322,21 +394,24 @@ echo -e "${GREEN}  RadioHeader installed successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "What's next:"
-echo "  1. Open any project with Claude Code"
-echo "  2. Run 'radioheader init' to set up the dynamic experience framework"
-echo "  3. As you work, experience flows into ~/.claude/radioheader/topics/"
-echo "  4. All projects can search and use shared experience"
+echo "  1. Open any project with Claude Code — RadioHeader is already active"
+echo "  2. Optionally run 'radioheader init' inside a project for per-project scaffolding"
 if [ "$COMMUNITY_ENABLED" = "true" ]; then
-echo "  5. Run 'radioheader sync' to download the community library"
+echo "  3. Run 'radioheader sync' to download the community library"
 fi
 echo ""
+echo "Everything else is automatic:"
+echo "  - Search index is built and kept up to date"
+echo "  - Context digest updates every few memory syncs"
+echo "  - Experience flows back via Echo hooks"
+echo ""
 echo "CLI commands:"
+echo "  radioheader search      # Search all experience (BM25 + synonyms)"
 echo "  radioheader init        # Initialize a project"
-echo "  radioheader search      # Search topics (local + community)"
+echo "  radioheader learn <url> # Extract article into shortwave"
+echo "  radioheader consolidate # Update context digest"
 echo "  radioheader status      # Show status"
 echo "  radioheader doctor      # Health check"
-echo "  radioheader community   # Manage community sharing"
-echo "  radioheader sync        # Sync community library"
 echo ""
 echo "Paths:"
 echo "  RadioHeader:  $RADIOHEADER_DIR/"

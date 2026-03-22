@@ -2,12 +2,37 @@
 
 # RadioHeader: PostToolUse hook for Write|Edit
 # When CC updates memory/ files, inject context to trigger RadioHeader + projectBasicInfo Echo.
+# Also auto-runs `radioheader consolidate` every N memory syncs (attention weight updates).
 # Requires jq.
 
 command -v jq &>/dev/null || exit 0
 
 INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
+
+# --- Auto-consolidate: count memory syncs, run consolidate every N ---
+CONSOLIDATE_COUNTER="$HOME/.claude/radioheader/.consolidate-counter"
+CONSOLIDATE_THRESHOLD=5
+
+if echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/"; then
+  # Increment counter
+  count=0
+  if [ -f "$CONSOLIDATE_COUNTER" ]; then
+    count=$(cat "$CONSOLIDATE_COUNTER" 2>/dev/null | tr -d '[:space:]')
+    count=${count:-0}
+  fi
+  count=$((count + 1))
+
+  if [ "$count" -ge "$CONSOLIDATE_THRESHOLD" ]; then
+    # Reset counter and run consolidate silently in background
+    echo "0" > "$CONSOLIDATE_COUNTER"
+    if command -v radioheader &>/dev/null; then
+      radioheader consolidate >/dev/null 2>&1 &
+    fi
+  else
+    echo "$count" > "$CONSOLIDATE_COUNTER"
+  fi
+fi
 
 # Trigger 1: memory/ writes → full Echo check
 if echo "$FILE_PATH" | grep -q "/memory/"; then

@@ -15,4 +15,12 @@ if [ -d "$RADIOHEADER_DIR/topics" ]; then
   fi
 fi
 
+# Inject context digest (attention-compressed environmental awareness)
+DIGEST="$RADIOHEADER_DIR/context-digest.md"
+if [ -f "$DIGEST" ]; then
+  echo "--- context-digest ---"
+  cat "$DIGEST"
+  echo "--- end digest ---"
+fi
+
 exit 0

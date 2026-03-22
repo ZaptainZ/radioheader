@@ -4,7 +4,7 @@ set -e
 # RadioHeader CLI — Cross-project experience sharing for Claude Code
 # Usage: radioheader <command> [options]
 
-VERSION="1.2.0"
+VERSION="1.4.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -15,6 +15,7 @@ COMMUNITY_POOL="$COMMUNITY_DIR/pool"
 CONFIG_FILE="$RADIOHEADER_DIR/config.json"
 PENDING_VOTES="$RADIOHEADER_DIR/pending-votes.jsonl"
 REGISTRY="$RADIOHEADER_DIR/project-registry.md"
+REGISTRY_JSON="$RADIOHEADER_DIR/project-registry.json"
 INDEX="$RADIOHEADER_DIR/INDEX.md"
 
 # Default community repository (users can override in config.json)
@@ -117,7 +118,8 @@ ${BOLD}USAGE${NC}
 
 ${BOLD}COMMANDS${NC}
   init        Initialize dynamic experience framework in current project
-  search      Search RadioHeader topics (local + community)
+  search      Search RadioHeader topics (local + community, FTS5 if indexed)
+  index       Build/update FTS5 search index (BM25 + synonyms)
   learn       Extract web article and generate shortwave entry
   upgrade     Upgrade registered projects to latest templates
   status      Show RadioHeader status
@@ -126,14 +128,19 @@ ${BOLD}COMMANDS${NC}
   community   Manage community shortwave sharing (on|off|status)
   sync        Sync community shortwave library
   publish     Publish local shortwave to community (quality+privacy+dedup)
+  vote        Vote on a shortwave entry (+1 or -1)
   device-sync Sync RadioHeader data across devices via git
+  consolidate Update project attention weights (memory consolidation)
   help        Show this help message
 
 ${BOLD}EXAMPLES${NC}
   radioheader init
   radioheader init --name "MyApp" --stack "iOS/SwiftUI"
   radioheader search "NavigationStack"
-  radioheader search "white screen|slow launch"
+  radioheader search "白屏"                        # auto synonym expansion
+  radioheader search --field=tags "NavigationStack"
+  radioheader index                                 # build FTS5 search index
+  radioheader index --rebuild                       # force full rebuild
   radioheader learn https://example.com/article
   radioheader learn https://mp.weixin.qq.com/s/xxx --topic ai-api-integration
   radioheader upgrade
@@ -148,6 +155,10 @@ ${BOLD}EXAMPLES${NC}
   radioheader sync
   radioheader publish sw-ios-task-inherits-mainactor.md
   radioheader publish --auto-detect
+  radioheader vote sw-backend-nginx-trailing-slash +1 "saved me hours"
+  radioheader vote sw-ios-preview-crash -1 "outdated"
+  radioheader consolidate                              # update attention weights
+  radioheader consolidate --dry-run                    # preview changes
 
 EOF
 }
@@ -324,7 +335,7 @@ EOF
     ok "Created $doc_dir/01_PROJECT_OVERVIEW.md"
   fi
 
-  # --- Register in project-registry.md ---
+  # --- Register in project-registry ---
 
   local project_path
   project_path="$(pwd)"
@@ -337,6 +348,98 @@ EOF
       echo "| $project_name | $tech_stack | $project_path | $memory_path | active |" >> "$REGISTRY"
       ok "Registered in project-registry.md"
     fi
+  fi
+
+  # Register in project-registry.json (Phase 6: attention weights)
+  if [ -f "$REGISTRY_JSON" ]; then
+    python3 -c "
+import json, sys, os
+path = '$REGISTRY_JSON'
+with open(path) as f:
+    data = json.load(f)
+
+# Check if project already registered
+proj_path = '$project_path'
+for p in data.get('projects', []):
+    if p.get('path', '').rstrip('/') == proj_path.rstrip('/'):
+        print('already registered')
+        sys.exit(0)
+    if p.get('name', '') == '$project_name':
+        print('already registered')
+        sys.exit(0)
+
+# Parse tech_stack into domain tokens
+tech = '$tech_stack'
+domains = [t.strip().lower().replace('(', '').replace(')', '')
+           for t in tech.replace('+', ',').replace('/', ',').split(',')
+           if t.strip()]
+
+# Add new project
+data.setdefault('projects', []).append({
+    'name': '$project_name',
+    'tech_stack': tech,
+    'path': proj_path,
+    'memory_path': '$memory_path',
+    'status': 'active',
+    'domains': domains,
+    'problems': [],
+    'user_role': '',
+    'pain_points': [],
+    'activity': 1.0,
+    'attention_weight': 1.0,
+    'search_hits': 0,
+    'last_active': None
+})
+
+# Update domain_index
+di = data.setdefault('domain_index', {})
+for d in domains:
+    if d not in di:
+        di[d] = []
+    if '$project_name' not in di[d]:
+        di[d].append('$project_name')
+
+with open(path, 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+print('registered')
+" 2>/dev/null
+    local reg_result=$?
+    if [ $reg_result -eq 0 ]; then
+      ok "Registered in project-registry.json"
+    fi
+  else
+    # Create initial JSON if missing
+    python3 -c "
+import json
+tech = '$tech_stack'
+domains = [t.strip().lower().replace('(', '').replace(')', '')
+           for t in tech.replace('+', ',').replace('/', ',').split(',')
+           if t.strip()]
+data = {
+    'version': 1,
+    'projects': [{
+        'name': '$project_name',
+        'tech_stack': tech,
+        'path': '$project_path',
+        'memory_path': '$memory_path',
+        'status': 'active',
+        'domains': domains,
+        'problems': [],
+        'user_role': '',
+        'pain_points': [],
+        'activity': 1.0,
+        'attention_weight': 1.0,
+        'search_hits': 0,
+        'last_active': None
+    }],
+    'domain_index': {d: ['$project_name'] for d in domains}
+}
+with open('$REGISTRY_JSON', 'w') as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+" 2>/dev/null
+    ok "Created and registered in project-registry.json"
   fi
 
   # --- Done ---
@@ -363,14 +466,213 @@ EOF
 # ============================================================
 
 cmd_search() {
-  if [ -z "$1" ]; then
+  local field=""
+  local pattern=""
+  local use_fts="auto"  # auto | yes | no
+  local use_attention="no"  # attention disabled by default (applied at consolidation, not search)
+
+  # Parse flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --field=*) field="${1#--field=}"; shift ;;
+      --field)   field="$2"; shift 2 ;;
+      --fts)     use_fts="yes"; shift ;;
+      --no-fts)  use_fts="no"; shift ;;
+      --no-expand) use_fts="yes"; shift ;;  # implies FTS
+      --attention) use_attention="yes"; shift ;;
+      --no-attention) use_attention="no"; shift ;;
+      --help|-h)
+        cat <<EOF
+
+${BOLD}radioheader search${NC} — Search RadioHeader (local + community)
+
+${BOLD}USAGE${NC}
+  radioheader search "keyword"
+  radioheader search --field=tags "keyword"
+
+${BOLD}OPTIONS${NC}
+  --field=<field>   Limit search to a specific field:
+                    tags, domain, id, symptom, fix, context, cause
+  --fts             Force FTS5 search (BM25 ranking + synonym expansion)
+  --no-fts          Force grep search (bypass FTS5 index)
+  --no-expand       Disable synonym expansion (FTS5 only)
+  --attention       Enable attention-weighted ranking (debug/experimental)
+  --no-attention    Explicitly disable attention (default)
+
+${BOLD}FTS5 SEARCH${NC}
+  When search.db exists, FTS5 is used automatically:
+  - BM25 ranking (relevance-based sorting)
+  - Synonym expansion (白屏 → blank screen, white screen, empty screen)
+  - Field-weighted scoring (tags/symptom weighted higher)
+  Build index: radioheader index [--rebuild]
+
+${BOLD}EXAMPLES${NC}
+  radioheader search "白屏"                    # auto-expands Chinese↔English
+  radioheader search --field=tags "NavigationStack"
+  radioheader search --field=symptom "crash"
+  radioheader search --no-fts "exact pattern"  # grep fallback
+
+EOF
+        return 0
+        ;;
+      *) pattern="$1"; shift ;;
+    esac
+  done
+
+  if [ -z "$pattern" ]; then
     err "Usage: radioheader search \"keyword\""
     err "Use | to separate multiple keywords: radioheader search \"keyword1|keyword2\""
     return 1
   fi
 
-  local pattern="$1"
+  # --- FTS5 search path ---
+  local fts_db="$RADIOHEADER_DIR/search.db"
+  local fts_script
+  fts_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fts-search.py"
+
+  # Determine if FTS5 should be used
+  local do_fts=0
+  if [ "$use_fts" = "yes" ]; then
+    do_fts=1
+  elif [ "$use_fts" = "auto" ] && [ -f "$fts_db" ] && [ -f "$fts_script" ]; then
+    do_fts=1
+  fi
+
+  if [ "$do_fts" -eq 1 ]; then
+    if [ ! -f "$fts_db" ]; then
+      warn "FTS5 index not found. Run 'radioheader index' to build it."
+      info "Falling back to grep search..."
+    elif [ ! -f "$fts_script" ]; then
+      warn "fts-search.py not found."
+      info "Falling back to grep search..."
+    else
+      # Run FTS5 search
+      local fts_args=("$fts_script" "$pattern" --json)
+      if [ -n "$field" ]; then
+        fts_args+=(--field "$field")
+      fi
+      if [ "$use_attention" = "yes" ]; then
+        fts_args+=(--attention)
+      fi
+
+      local fts_output
+      fts_output=$(python3 "${fts_args[@]}" 2>/dev/null)
+      if [ $? -ne 0 ] || [ -z "$fts_output" ]; then
+        warn "FTS5 search failed, falling back to grep..."
+      else
+        # Parse and display FTS5 results
+        local fts_count
+        fts_count=$(echo "$fts_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['count'])" 2>/dev/null)
+        local fts_expanded
+        fts_expanded=$(echo "$fts_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(', '.join(d['expanded']))" 2>/dev/null)
+
+        if [ "${fts_count:-0}" -eq 0 ]; then
+          local search_desc="$pattern"
+          if [ -n "$field" ]; then
+            search_desc="$pattern (field: $field)"
+          fi
+          warn "No matches found for: $search_desc"
+          echo -e "${DIM}Tip: Try broader keywords or synonyms.${NC}"
+          return 0
+        fi
+
+        # Header
+        local display_pattern="$pattern"
+        if [ -n "$field" ]; then
+          display_pattern="$pattern ${DIM}(field: $field)${NC}"
+        fi
+        echo -e "${DIM}Searching (FTS5): ${NC}${BOLD}$display_pattern${NC}"
+        if [ -n "$fts_expanded" ]; then
+          echo -e "${DIM}Synonyms: +${fts_expanded}${NC}"
+        fi
+        # Determine ranking mode display
+        local rank_mode="BM25"
+        if [ "$use_attention" = "yes" ]; then
+          local has_attention
+          has_attention=$(echo "$fts_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('attention') else 'no')" 2>/dev/null)
+          if [ "$has_attention" = "yes" ]; then
+            rank_mode="BM25 + Attention"
+          fi
+        fi
+        echo -e "${GREEN}Found $fts_count result(s) (${rank_mode} ranked):${NC}"
+
+        # Show project attention scores if available
+        if [ "$use_attention" = "yes" ]; then
+          local attn_scores
+          attn_scores=$(echo "$fts_output" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+ps=d.get('project_scores',{})
+if ps:
+    parts=[f'{k}={v}' for k,v in ps.items()]
+    print(', '.join(parts))
+" 2>/dev/null)
+          if [ -n "$attn_scores" ]; then
+            echo -e "${DIM}  Project attention: ${attn_scores}${NC}"
+          fi
+        fi
+        echo ""
+
+        # Display results grouped by source
+        echo "$fts_output" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+by_source = {'shortwave': [], 'community': [], 'topic': []}
+for r in d['results']:
+    src = r['source']
+    if src in by_source:
+        by_source[src].append(r)
+
+labels = {
+    'shortwave': '📡 Shortwave (本地精炼)',
+    'community': '🌐 Community (社区共享)',
+    'topic': '📂 Topics (详细)',
+}
+for src in ['shortwave', 'community', 'topic']:
+    entries = by_source[src]
+    if not entries:
+        continue
+    print(f'  \033[1m{labels[src]}:\033[0m')
+    for r in entries:
+        title = r['title'] or r['id']
+        # Truncate long titles
+        if len(title) > 70:
+            title = title[:67] + '...'
+        # Attention weight indicator
+        attn = ''
+        aw = r.get('attention_weight')
+        if aw and aw != 1.0:
+            attn = f' \033[33m[attn:{aw:.1f}]\033[0m'
+        # Project info
+        proj = ''
+        if r.get('projects'):
+            proj = f' \033[2m({r[\"projects\"]})\033[0m'
+        print(f'    \033[0;36m{r[\"id\"]}\033[0m: {title}{attn}{proj}')
+        if r.get('symptom'):
+            s = r['symptom']
+            if len(s) > 80:
+                s = s[:77] + '...'
+            print(f'      \033[2msymptom: {s}\033[0m')
+    print()
+" 2>/dev/null
+        return 0
+      fi
+    fi
+  fi
+
   local total_matches=0
+
+  # Build grep pattern: if field specified, anchor to field prefix
+  local grep_pattern="$pattern"
+  if [ -n "$field" ]; then
+    # Normalize field aliases
+    local field_regex="$field"
+    case "$field" in
+      symptom|symptoms) field_regex="symptoms?" ;;
+    esac
+    # Match lines that start with the field name (case-insensitive)
+    grep_pattern="^${field_regex}:.*($pattern)"
+  fi
 
   # --- Shortwave results (refined, shown first) ---
   local sw_results=""
@@ -379,7 +681,7 @@ cmd_search() {
     local sw_file_count
     sw_file_count=$(find "$SHORTWAVE_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
     if [ "$sw_file_count" -gt 0 ]; then
-      sw_results=$(grep -n -i -E "$pattern" "$SHORTWAVE_DIR"/*.md 2>/dev/null || true)
+      sw_results=$(grep -n -i -E "$grep_pattern" "$SHORTWAVE_DIR"/*.md 2>/dev/null || true)
       if [ -n "$sw_results" ]; then
         sw_count=$(echo "$sw_results" | wc -l | tr -d ' ')
       fi
@@ -393,7 +695,7 @@ cmd_search() {
     local pool_file_count
     pool_file_count=$(find "$COMMUNITY_POOL" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
     if [ "$pool_file_count" -gt 0 ]; then
-      community_results=$(grep -n -i -E "$pattern" "$COMMUNITY_POOL"/*.md 2>/dev/null || true)
+      community_results=$(grep -n -i -E "$grep_pattern" "$COMMUNITY_POOL"/*.md 2>/dev/null || true)
       if [ -n "$community_results" ]; then
         community_count=$(echo "$community_results" | wc -l | tr -d ' ')
       fi
@@ -407,7 +709,7 @@ cmd_search() {
     local topic_file_count
     topic_file_count=$(find "$TOPICS_DIR" -name "*.md" -type f 2>/dev/null | wc -l | tr -d ' ')
     if [ "$topic_file_count" -gt 0 ]; then
-      topic_results=$(grep -n -i -E "$pattern" "$TOPICS_DIR"/*.md 2>/dev/null || true)
+      topic_results=$(grep -n -i -E "$grep_pattern" "$TOPICS_DIR"/*.md 2>/dev/null || true)
       if [ -n "$topic_results" ]; then
         topic_count=$(echo "$topic_results" | wc -l | tr -d ' ')
       fi
@@ -417,12 +719,20 @@ cmd_search() {
   total_matches=$((sw_count + community_count + topic_count))
 
   if [ "$total_matches" -eq 0 ]; then
-    warn "No matches found for: $pattern"
-    echo -e "${DIM}Tip: Try broader keywords or synonyms.${NC}"
+    local search_desc="$pattern"
+    if [ -n "$field" ]; then
+      search_desc="$pattern (field: $field)"
+    fi
+    warn "No matches found for: $search_desc"
+    echo -e "${DIM}Tip: Try broader keywords or synonyms. Use --field to filter by specific fields.${NC}"
     return 0
   fi
 
-  echo -e "${DIM}Searching for: ${NC}${BOLD}$pattern${NC}"
+  local display_pattern="$pattern"
+  if [ -n "$field" ]; then
+    display_pattern="$pattern ${DIM}(field: $field)${NC}"
+  fi
+  echo -e "${DIM}Searching for: ${NC}${BOLD}$display_pattern${NC}"
   echo -e "${GREEN}Found $total_matches match(es):${NC}"
   echo ""
 
@@ -491,6 +801,34 @@ cmd_search() {
     done
     echo ""
   fi
+}
+
+# ============================================================
+# index
+# ============================================================
+
+cmd_index() {
+  local rebuild=""
+  if [ "${1:-}" = "--rebuild" ]; then
+    rebuild="--rebuild"
+  fi
+
+  local index_script
+  index_script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/fts-index.py"
+
+  if [ ! -f "$index_script" ]; then
+    err "fts-index.py not found at: $index_script"
+    return 1
+  fi
+
+  if ! command -v python3 &>/dev/null; then
+    err "python3 is required for FTS5 indexing."
+    return 1
+  fi
+
+  info "Building FTS5 search index..."
+  python3 "$index_script" --db "$RADIOHEADER_DIR/search.db" --radioheader-dir "$RADIOHEADER_DIR" $rebuild
+  ok "Search index ready. Use 'radioheader search' to search with BM25 ranking + synonym expansion."
 }
 
 # ============================================================
@@ -1699,7 +2037,22 @@ _dedup_check() {
     done
   fi
 
-  if [ "$best_overlap" -ge 3 ] || [ -n "$best_match" ]; then
+  # Determine severity: high overlap = block, moderate = warn
+  if [ -n "$best_match" ]; then
+    # Check if this is a high-confidence duplicate (tags ≥80% or slug keywords ≥4)
+    if echo "$best_match" | grep -q "tags.*overlap"; then
+      local overlap_pct
+      overlap_pct=$(echo "$best_match" | grep -o '[0-9]*%' | tr -d '%')
+      if [ "${overlap_pct:-0}" -ge 80 ]; then
+        echo "duplicate:$best_match"
+        return
+      fi
+    elif [ "$best_overlap" -ge 4 ]; then
+      echo "duplicate:$best_match (slug $best_overlap keywords overlap)"
+      return
+    fi
+    echo "similar:$best_match"
+  elif [ "$best_overlap" -ge 3 ]; then
     echo "similar:$best_match"
   else
     echo "0"
@@ -1708,12 +2061,14 @@ _dedup_check() {
 
 cmd_publish() {
   local mode="interactive"
+  local auto_sync=0
   local files_to_publish=()
 
   # Parse flags
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --auto-detect) mode="auto"; shift ;;
+      --sync) auto_sync=1; shift ;;
       --help|-h)
         cat <<EOF
 ${BOLD}radioheader publish${NC} — Publish local shortwave to community
@@ -1721,6 +2076,8 @@ ${BOLD}radioheader publish${NC} — Publish local shortwave to community
 ${BOLD}USAGE${NC}
   radioheader publish <file>           Publish a specific shortwave file
   radioheader publish --auto-detect    Scan local shortwave for publishable entries
+  radioheader publish --sync           Auto-sync after publish (combines publish + sync)
+  radioheader publish --auto-detect --sync
 
 ${BOLD}THREE GATES${NC}
   ① Quality:  Four-dimension score ≥ 6/8 (Searchability, Actionability, Independence, Precision)
@@ -1857,11 +2214,19 @@ EOF
       skipped=$((skipped + 1))
       echo ""
       continue
+    elif echo "$dedup_result" | grep -q "^duplicate:"; then
+      local dup_to
+      dup_to="${dedup_result#duplicate:}"
+      echo -e "  ③ Dedup:    ${RED}SKIP${NC} (high-confidence duplicate: $dup_to)"
+      echo -e "    ${DIM}Tags ≥80% overlap or slug ≥4 keywords overlap — skipping.${NC}"
+      skipped=$((skipped + 1))
+      echo ""
+      continue
     else
       local similar_to
       similar_to="${dedup_result#similar:}"
       echo -e "  ③ Dedup:    ${YELLOW}WARN${NC} (similar entry: $similar_to)"
-      echo -e "    ${DIM}Proceeding anyway — review recommended before sync${NC}"
+      echo -e "    ${DIM}Proceeding — review recommended before sync${NC}"
     fi
 
     # All gates passed — stage for publishing
@@ -1882,10 +2247,165 @@ EOF
   fi
 
   if [ "$passed" -gt 0 ]; then
-    echo ""
-    echo -e "  ${DIM}Run 'radioheader sync' to push staged entries to the community repository.${NC}"
+    if [ "$auto_sync" -eq 1 ]; then
+      echo ""
+      info "Auto-syncing to community repository..."
+      cmd_sync
+    else
+      echo ""
+      echo -e "  ${DIM}Run 'radioheader sync' to push staged entries to the community repository.${NC}"
+      echo -e "  ${DIM}Tip: use 'radioheader publish --sync' to auto-sync after publish.${NC}"
+    fi
   fi
   echo ""
+}
+
+# ============================================================
+# vote
+# ============================================================
+
+cmd_vote() {
+  # Usage: radioheader vote <entry_id> [+1|-1] [reason]
+  if [ $# -lt 1 ] || [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+    cat <<EOF
+
+${BOLD}radioheader vote${NC} — Vote on a shortwave entry
+
+${BOLD}USAGE${NC}
+  radioheader vote <entry_id> [+1|-1] [reason]
+
+${BOLD}ARGUMENTS${NC}
+  entry_id    Shortwave entry ID (e.g. sw-ios-task-inherits-mainactor)
+              Also accepts filename (sw-ios-xxx.md) or partial match
+  +1 / -1     Upvote (default) or downvote
+  reason      Optional reason for the vote
+
+${BOLD}EXAMPLES${NC}
+  radioheader vote sw-backend-nginx-trailing-slash
+  radioheader vote sw-backend-nginx-trailing-slash +1 "saved me hours"
+  radioheader vote sw-ios-preview-crash -1 "outdated, no longer reproduces"
+
+${BOLD}NOTES${NC}
+  Votes are stored in pending-votes.jsonl and uploaded on next 'radioheader sync'.
+  Duplicate votes (same machine + same entry) are deduplicated by hash.
+
+EOF
+    return 0
+  fi
+
+  local entry_id="$1"
+  local vote_val="${2:-+1}"
+  local reason="${3:-}"
+
+  # Strip .md extension if provided
+  entry_id="${entry_id%.md}"
+
+  # Normalize vote value
+  case "$vote_val" in
+    +1|1|up|yes)   vote_val=1 ;;
+    -1|down|no)    vote_val=-1 ;;
+    *)
+      # Maybe user skipped vote_val and this is the reason
+      if [ "$vote_val" != "1" ] && [ "$vote_val" != "-1" ]; then
+        reason="$vote_val"
+        vote_val=1
+      fi
+      ;;
+  esac
+
+  # Validate entry exists (local shortwave or community pool)
+  local found=0
+  local found_location=""
+  if [ -f "$SHORTWAVE_DIR/${entry_id}.md" ]; then
+    found=1
+    found_location="local shortwave"
+  elif [ -d "$COMMUNITY_POOL" ] && [ -f "$COMMUNITY_POOL/${entry_id}.md" ]; then
+    found=1
+    found_location="community pool"
+  else
+    # Try partial match (deduplicate by basename)
+    local matches
+    matches=$(find "$SHORTWAVE_DIR" "$COMMUNITY_POOL" -name "*${entry_id}*.md" 2>/dev/null | awk -F/ '!seen[$NF]++' | head -5)
+    if [ -n "$matches" ]; then
+      local count
+      count=$(echo "$matches" | wc -l | tr -d ' ')
+      if [ "$count" -eq 1 ]; then
+        entry_id=$(basename "$matches" .md)
+        found=1
+        if echo "$matches" | grep -q "$SHORTWAVE_DIR"; then
+          found_location="local shortwave"
+        else
+          found_location="community pool"
+        fi
+      else
+        warn "Multiple matches for '$entry_id':"
+        echo "$matches" | while read -r f; do
+          echo "  $(basename "$f" .md)"
+        done
+        echo ""
+        echo "Please specify the exact entry ID."
+        return 1
+      fi
+    fi
+  fi
+
+  if [ "$found" -eq 0 ]; then
+    warn "Entry not found: $entry_id"
+    echo "  Searched in: shortwave/ and community/pool/"
+    echo "  Tip: use 'radioheader search' to find the correct ID."
+    return 1
+  fi
+
+  # Generate machine hash for dedup (hostname + username, hashed)
+  local machine_hash
+  machine_hash=$(echo "$(hostname)-$(whoami)" | shasum -a 256 | cut -c1-16)
+
+  # Check for duplicate vote
+  if [ -f "$PENDING_VOTES" ]; then
+    if grep -q "\"hash\":\"$machine_hash\"" "$PENDING_VOTES" && \
+       grep -q "\"id\":\"$entry_id\"" "$PENDING_VOTES"; then
+      # Check if same hash+id combo exists on same line
+      if grep "\"id\":\"$entry_id\"" "$PENDING_VOTES" | grep -q "\"hash\":\"$machine_hash\""; then
+        warn "You already have a pending vote for '$entry_id'."
+        echo "  It will be uploaded on next 'radioheader sync'."
+        echo "  To change your vote, edit $PENDING_VOTES manually."
+        return 0
+      fi
+    fi
+  fi
+
+  # Build vote JSON
+  local ts
+  ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+  local vote_json="{\"id\":\"$entry_id\",\"vote\":$vote_val,\"reason\":\"$reason\",\"ts\":\"$ts\",\"hash\":\"$machine_hash\"}"
+
+  # Append to pending votes
+  echo "$vote_json" >> "$PENDING_VOTES"
+
+  # Display confirmation
+  local vote_icon
+  if [ "$vote_val" -eq 1 ]; then
+    vote_icon="${GREEN}👍 +1${NC}"
+  else
+    vote_icon="${RED}👎 -1${NC}"
+  fi
+
+  ok "Vote recorded!"
+  echo -e "  Entry:    ${BOLD}$entry_id${NC} ($found_location)"
+  echo -e "  Vote:     $vote_icon"
+  if [ -n "$reason" ]; then
+    echo -e "  Reason:   $reason"
+  fi
+  echo ""
+  echo -e "  ${DIM}Run 'radioheader sync' to upload your vote.${NC}"
+
+  # Show pending vote count
+  local pending_count
+  pending_count=$(wc -l < "$PENDING_VOTES" | tr -d ' ')
+  if [ "$pending_count" -gt 1 ]; then
+    echo -e "  ${DIM}($pending_count pending votes total)${NC}"
+  fi
 }
 
 # ============================================================
@@ -2631,12 +3151,68 @@ EXTRACTHEADER
 }
 
 # ============================================================
+# consolidate — update project attention weights
+# ============================================================
+
+cmd_consolidate() {
+  local script
+  script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/attn-consolidate.py"
+
+  if [ ! -f "$script" ]; then
+    err "attn-consolidate.py not found at: $script"
+    return 1
+  fi
+
+  local args=("$script")
+  args+=(--radioheader-dir "$RADIOHEADER_DIR")
+
+  # Pass through flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) args+=(--dry-run); shift ;;
+      --help|-h)
+        cat <<EOF
+
+${BOLD}radioheader consolidate${NC} — Update project attention weights
+
+${BOLD}USAGE${NC}
+  radioheader consolidate
+  radioheader consolidate --dry-run
+
+${BOLD}DESCRIPTION${NC}
+  Analyzes search logs to update project attention weights.
+  Like "sleep consolidation" in human memory — periodic compression
+  of usage patterns into stable weights.
+
+  Actions:
+  - Update activity scores based on last_active decay
+  - Count search hits per project from search-log.jsonl
+  - Recalculate attention_weight for each project
+  - Rebuild domain_index in project-registry.json
+  - Generate human-readable project-registry.md
+  - Trim search log to last 90 days
+
+${BOLD}OPTIONS${NC}
+  --dry-run    Show changes without modifying files
+
+EOF
+        return 0
+        ;;
+      *) shift ;;
+    esac
+  done
+
+  python3 "${args[@]}"
+}
+
+# ============================================================
 # Main — subcommand routing
 # ============================================================
 
 case "${1:-help}" in
   init)         shift; cmd_init "$@" ;;
   search)       shift; cmd_search "$@" ;;
+  index)        shift; cmd_index "$@" ;;
   learn)        shift; cmd_learn "$@" ;;
   upgrade)      shift; cmd_upgrade "$@" ;;
   status)       cmd_status ;;
@@ -2645,7 +3221,9 @@ case "${1:-help}" in
   community)    shift; cmd_community "$@" ;;
   sync)         cmd_sync ;;
   publish)      shift; cmd_publish "$@" ;;
+  vote)         shift; cmd_vote "$@" ;;
   device-sync)  shift; cmd_device_sync "$@" ;;
+  consolidate)  shift; cmd_consolidate "$@" ;;
   help|--help|-h) cmd_help ;;
   --version|-v) echo "radioheader v$VERSION" ;;
   *)

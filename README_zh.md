@@ -56,6 +56,10 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **Learn（外部知识采集）** — RadioHeader 不只靠踩坑积累经验。`learn` 命令从任意 URL 提取文章——包括微信公众号、Medium、Substack 等封闭平台——并提炼为短波条目。这让 RadioHeader 从被动的经验管理器升级为 Claude Code 的主动**信息入口**：不只记住教训，而是主动从外部世界吸收知识。
 
+**环境认知摘要（注意力压缩）** — 灵感来自 [Kimi 的 Attention Residuals](https://github.com/MoonshotAI/Attention-Residuals) 研究。RadioHeader 构建一份压缩的环境认知画像，在每次会话开始时注入。注意力机制不作用于搜索排序（内容匹配已经足够好），而是作用于**记忆整合**层面——类似人类睡眠中的记忆巩固。每隔几次记忆同步，`consolidate` 自动运行，生成 `context-digest.md`，包含：用户特征（解题风格、长处、已知短板）、项目全景（每个项目做什么、当前痛点、活跃度）、近期搜索热点、跨项目技术交叉。Agent 每次会话一开始就知道自己在帮谁——不只是在看什么代码。
+
+**用户画像（三个维度）** — RadioHeader 跨三个维度维护用户模型：(1) **做过什么**——项目组合，每个项目的领域、问题和痛点，记录在 `project-registry.json`；(2) **怎么工作**——解题方式、交互偏好、已知长处和短板；(3) **有什么资源**——设备、网络环境、基础设施。这份画像是记忆整合的"查询向量"——决定了什么被强调、什么被关联、Agent 应该主动关注什么。
+
 **社区共享** — 可选的社区短波库。你的本地经验始终留在本地；发布时经过三关检查（质量评分 ≥6/8、隐私扫描、去重检查）才能进入共享池。质量治理采用 [Stigmergy（痕迹协作）](https://zh.wikipedia.org/wiki/%E5%8D%8F%E4%BD%9C%E6%80%A7) 模型——类似蚁群信息素：好条目通过使用被强化，差条目自然衰减。
 
 ## 快速开始
@@ -74,14 +78,17 @@ cd radioheader
 
 ```
 RadioHeader (~/.claude/radioheader/)
-├── shortwave/   ← 精炼的、项目无关的知识（Shortwave）
-├── topics/      ← 带 [source:] 标签的详细经验
-└── INDEX.md     ← 主索引
+├── shortwave/            ← 精炼的、项目无关的知识
+├── topics/               ← 带 [source:] 标签的详细经验
+├── project-registry.json ← 项目名片（领域、问题、痛点）
+├── user-profile.md       ← 用户画像（工作方式、资源）
+├── context-digest.md     ← 环境认知摘要（自动生成）
+└── INDEX.md              ← 主索引
 
-    ▲ Echo   ║ 搜索
-    ║        ▼
-
-项目 A memory/     项目 B memory/     项目 N memory/
+    ▲ Echo        ║ 搜索      consolidate ──→ context-digest.md
+    ║             ▼                                    ║
+                                                       ▼
+项目 A memory/       项目 B memory/       SessionStart（自动注入）
 ```
 
 修 bug 时，Claude 先记录到项目的 memory/ 中。PostToolUse hook 触发后，Claude 判断：*这条经验跨项目有用吗？* 如果是，写入 `topics/` 并标注 `[source:项目名]`，然后精炼为 `shortwave/` 条目。
@@ -100,9 +107,32 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 踩坑修复 (Echo) ─────────→                        ──→ search 命令
 外部文章 (learn) ────────→  topics/ + shortwave/  ──→ Agent 搜→用→追
 社区共享 (sync) ─────────→                        ──→ publish 投稿
+用户行为 ────────────────→  consolidate           ──→ context-digest（SessionStart 注入）
 ```
 
 这让 RadioHeader 成为一个**信息入口**——外部知识流入 Claude Code 工作记忆的统一入口。不是浏览器，不是书签管理器，而是一个能吸收、提炼、并在需要时精准供给知识的系统。
+
+### Consolidate — 睡眠中的记忆整合
+
+人类的记忆在睡眠中压缩：具体事件渐渐模糊，但规律和技能沉淀下来。RadioHeader 的 `consolidate` 做同样的事：
+
+```
+记忆同步不断积累 → 每 5 次自动触发 consolidate
+                              ↓
+              分析搜索日志 + 项目活跃度 + 用户画像
+                              ↓
+              生成 context-digest.md（压缩的环境认知）
+                              ↓
+              下次会话：Agent 一开始就拥有完整的环境上下文
+```
+
+环境认知摘要在读任何代码之前就告诉 Agent：
+- **在帮谁**——解题风格、长处、已知短板
+- **他在做什么**——12 个项目的领域、痛点、活跃度
+- **最近在关注什么**——搜索热词和焦点领域
+- **哪些技术跨越了多个项目**——技能迁移的机会在哪里
+
+这不是搜索优化——是 **Agent 校准**。区别在于：没有摘要时，Agent 对每个用户一视同仁。有了摘要，Agent 知道这个用户倾向于在启动路径上做贪婪加载、schema 迁移测试不充分、最近在关注搜索质量优化。这些上下文影响 Agent 的每一条建议。
 
 ### 社区共享
 
@@ -140,7 +170,9 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 |------|------|
 | `radioheader init` | 在项目中初始化经验框架 |
 | `radioheader search <关键词>` | 搜索 topics、shortwave 和社区库 |
+| `radioheader index [--rebuild]` | 构建/更新 FTS5 搜索索引（BM25 + 同义词） |
 | `radioheader learn <url>` | 提取网页文章并生成短波条目 |
+| `radioheader consolidate` | 更新项目权重并生成环境认知摘要 |
 | `radioheader upgrade` | 将已注册项目升级到最新模板 |
 | `radioheader status` | 查看主题数、条目数、社区状态 |
 | `radioheader doctor` | 健康检查：hooks、规则、注册表 |
@@ -151,6 +183,7 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 | `radioheader sync` | 同步社区库 + 上传投票/条目 |
 | `radioheader publish <文件>` | 发布短波到社区（三关检查） |
 | `radioheader publish --auto-detect` | 扫描本地可发布的短波 |
+| `radioheader vote <id> [+1\|-1]` | 投票评价短波条目 |
 | `radioheader device-sync init <url>` | 跨设备同步初始化（via git） |
 | `radioheader device-sync push\|pull` | 在设备间推送/拉取 RadioHeader 数据 |
 
@@ -175,6 +208,8 @@ radioheader sync
 **症状关键词 > 解法关键词。** 开发者搜的是"白屏"、"启动慢"，不是"Task.detached"。经验条目如果删掉了症状词，就再也搜不到了。每条经验必须保留用户实际会搜索的词。
 
 **指令胜过知识。** 写"经验存在这里"不会驱动行为，写"你必须先搜这里"才会。CLAUDE.md 的内容必须是强制性行为指令，不是参考文档。
+
+**注意力属于记忆压缩，不属于搜索。** 我们最初把注意力权重加到搜索结果上（提升活跃项目的条目排名）。测试发现排序变化为零——BM25 内容匹配已经给出了正确结果。注意力真正的价值在于记忆整合：将用户的项目全景、行为模式和已知短板压缩成一份摘要，影响的是 Agent 怎么思考，而不是搜到什么。
 
 更多详见 [docs/lessons-learned.md](docs/lessons-learned.md)。
 
