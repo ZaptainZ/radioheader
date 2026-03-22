@@ -120,7 +120,10 @@ chmod +x "$HOOKS_DIR/radioheader-memory-sync.sh"
 cp "$SCRIPT_DIR/templates/hooks/radioheader-stop-echo.sh" "$HOOKS_DIR/radioheader-stop-echo.sh"
 chmod +x "$HOOKS_DIR/radioheader-stop-echo.sh"
 
-ok "Installed hook scripts (4 hooks)"
+cp "$SCRIPT_DIR/templates/hooks/radioheader-error-capture.sh" "$HOOKS_DIR/radioheader-error-capture.sh"
+chmod +x "$HOOKS_DIR/radioheader-error-capture.sh"
+
+ok "Installed hook scripts (5 hooks)"
 
 # --- Step 3: Append rules to CLAUDE.md ---
 
@@ -199,6 +202,12 @@ if [ -f "$SETTINGS_JSON" ]; then
         fi
       fi
 
+      # --- PostToolUse hooks (error capture) ---
+      ERROR_HOOK='[{"matcher": "Bash", "hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-error-capture.sh"}]}]'
+      if ! grep -q "radioheader-error-capture" "$TEMP_JSON" 2>/dev/null; then
+        jq --argjson h "$ERROR_HOOK" '.hooks.PostToolUse += $h' "$TEMP_JSON" > "$TEMP_JSON.tmp" && mv "$TEMP_JSON.tmp" "$TEMP_JSON"
+      fi
+
       # --- Stop hooks (Echo reminder) ---
       if [ "$HAS_STOP_HOOK" -eq 0 ]; then
         STOP_HOOK='[{"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-stop-echo.sh"}]}]'
@@ -221,7 +230,8 @@ if [ -f "$SETTINGS_JSON" ]; then
       {"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-loader.sh"}]}
     ],
     "PostToolUse": [
-      {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-memory-sync.sh"}]}
+      {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-memory-sync.sh"}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-error-capture.sh"}]}
     ],
     "Stop": [
       {"hooks": [{"type": "command", "command": "~/.claude/hooks/radioheader-stop-echo.sh"}]}
@@ -262,6 +272,15 @@ else
           {
             "type": "command",
             "command": "~/.claude/hooks/radioheader-memory-sync.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/hooks/radioheader-error-capture.sh"
           }
         ]
       }

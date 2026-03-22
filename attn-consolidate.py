@@ -71,6 +71,67 @@ def load_search_log(rdir: str, days: int = 30) -> list:
     return entries
 
 
+def load_error_log(rdir: str, days: int = 30) -> list:
+    """Load recent error log entries."""
+    path = os.path.join(rdir, "error-log.jsonl")
+    if not os.path.exists(path):
+        return []
+
+    cutoff = datetime.now() - timedelta(days=days)
+    entries = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                ts_str = entry.get("ts", "")
+                try:
+                    ts = datetime.fromisoformat(ts_str)
+                except (ValueError, TypeError):
+                    continue
+                if ts >= cutoff:
+                    entries.append(entry)
+            except json.JSONDecodeError:
+                continue
+    return entries
+
+
+def analyze_error_patterns(error_log: list) -> dict:
+    """Analyze error log for recurring patterns, grouped by project (cwd).
+
+    Returns: {cwd: [{pattern, count, snippet, first_seen, last_seen}]}
+    """
+    # Group by (cwd, pattern)
+    from collections import Counter
+    pattern_counts = defaultdict(lambda: defaultdict(list))
+
+    for entry in error_log:
+        cwd = entry.get("cwd", "unknown")
+        pattern = entry.get("pattern", "")
+        if pattern:
+            pattern_counts[cwd][pattern].append(entry)
+
+    result = {}
+    for cwd, patterns in pattern_counts.items():
+        recurring = []
+        for pattern, entries in patterns.items():
+            if len(entries) >= 2:  # Only flag if it happened 2+ times
+                timestamps = [e.get("ts", "") for e in entries]
+                recurring.append({
+                    "pattern": pattern,
+                    "count": len(entries),
+                    "snippet": entries[-1].get("snippet", ""),
+                    "first_seen": min(timestamps) if timestamps else "",
+                    "last_seen": max(timestamps) if timestamps else "",
+                })
+        if recurring:
+            result[cwd] = sorted(recurring, key=lambda x: -x["count"])
+
+    return result
+
+
 def compute_activity_decay(last_active: str, today: datetime) -> float:
     """Compute activity score based on last_active date.
 
@@ -176,7 +237,8 @@ def load_user_profile(rdir: str) -> dict:
     return profile
 
 
-def generate_context_digest(rdir: str, registry: dict, search_log: list, today: datetime):
+def generate_context_digest(rdir: str, registry: dict, search_log: list,
+                            error_patterns: dict, today: datetime):
     """Generate context-digest.md — compressed environmental awareness for Agent.
 
     This is where attention mechanism produces its output:
@@ -297,6 +359,43 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list, today: 
             lines.append(f"- **{domain}**: {', '.join(proj_names)}")
         lines.append("")
 
+    # Recurring error patterns (project-level issues to record)
+    if error_patterns:
+        lines.append("## 反复出现的问题（需要记录到项目记忆中）")
+        lines.append("")
+        lines.append("> 以下错误在多次会话中重复出现。请检查对应项目的 CLAUDE.md 或 MEMORY.md，")
+        lines.append("> 将结构性事实（如 git 仓库路径、构建命令、环境依赖）记录下来，避免反复探索。")
+        lines.append("")
+
+        # Try to map cwd to project name
+        project_map = {}
+        for p in registry.get("projects", []):
+            proj_path = os.path.expanduser(p.get("path", ""))
+            if proj_path:
+                project_map[proj_path.rstrip("/")] = p["name"]
+
+        for cwd, patterns in error_patterns.items():
+            # Find project name from cwd
+            proj_name = "未知项目"
+            cwd_clean = cwd.rstrip("/")
+            for proj_path, name in project_map.items():
+                if cwd_clean.startswith(proj_path) or proj_path.startswith(cwd_clean):
+                    proj_name = name
+                    break
+
+            lines.append(f"**{proj_name}** (`{cwd}`):")
+            for p in patterns:
+                label_map = {
+                    "not-a-git-repo": "git 仓库不在此目录",
+                    "file-not-found": "文件/路径不存在",
+                    "command-not-found": "命令未安装",
+                    "permission-denied": "权限不足",
+                    "network-error": "网络连接问题",
+                }
+                label = label_map.get(p["pattern"], p["pattern"])
+                lines.append(f"- {label} ({p['count']} 次): `{p['snippet']}`")
+            lines.append("")
+
     # Write digest
     digest_path = os.path.join(rdir, "context-digest.md")
     with open(digest_path, "w") as f:
@@ -310,9 +409,16 @@ def consolidate(rdir: str, dry_run: bool = False):
     registry = load_registry(rdir)
     projects = registry.get("projects", [])
     search_log = load_search_log(rdir)
+    error_log = load_error_log(rdir)
+    error_patterns = analyze_error_patterns(error_log)
     today = datetime.now()
 
-    print(f"Consolidating {len(projects)} projects, {len(search_log)} recent searches...")
+    error_info = f", {len(error_log)} errors" if error_log else ""
+    print(f"Consolidating {len(projects)} projects, {len(search_log)} recent searches{error_info}...")
+
+    if error_patterns:
+        total_recurring = sum(len(ps) for ps in error_patterns.values())
+        print(f"  Found {total_recurring} recurring error pattern(s) across {len(error_patterns)} project(s)")
 
     # 1. Count project hits from search log
     project_hits = defaultdict(int)
@@ -404,8 +510,32 @@ def consolidate(rdir: str, dry_run: bool = False):
         print(f"Search log: kept {kept} entries (trimmed to 90 days)")
 
     # 7. Generate context digest (the actual attention output)
-    digest_path = generate_context_digest(rdir, registry, search_log, today)
+    digest_path = generate_context_digest(rdir, registry, search_log, error_patterns, today)
     print(f"Generated: {digest_path}")
+
+    # 8. Trim error log (keep last 30 days — errors are more ephemeral than searches)
+    error_log_path = os.path.join(rdir, "error-log.jsonl")
+    if os.path.exists(error_log_path):
+        cutoff = today - timedelta(days=30)
+        kept = 0
+        lines = []
+        with open(error_log_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    ts = datetime.fromisoformat(entry.get("ts", ""))
+                    if ts >= cutoff:
+                        lines.append(line)
+                        kept += 1
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        with open(error_log_path, "w") as f:
+            f.write("\n".join(lines) + "\n" if lines else "")
+        if error_log:
+            print(f"Error log: kept {kept} entries (trimmed to 30 days)")
 
     print("Done.")
 
