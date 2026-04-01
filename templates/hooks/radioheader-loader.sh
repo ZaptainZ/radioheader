@@ -16,10 +16,20 @@ if [ -d "$RADIOHEADER_DIR/topics" ]; then
 fi
 
 # Inject context digest (attention-compressed environmental awareness)
+# Budget guard: Claude Code truncates instruction files at ~4K chars.
+# If digest exceeds 3500 chars, inject truncated version with warning.
+MAX_DIGEST_CHARS=3500
 DIGEST="$RADIOHEADER_DIR/context-digest.md"
 if [ -f "$DIGEST" ]; then
+  DIGEST_SIZE=$(wc -c < "$DIGEST" | tr -d ' ')
   echo "--- context-digest ---"
-  cat "$DIGEST"
+  if [ "$DIGEST_SIZE" -le "$MAX_DIGEST_CHARS" ]; then
+    cat "$DIGEST"
+  else
+    head -c "$MAX_DIGEST_CHARS" "$DIGEST"
+    echo ""
+    echo "> [loader truncated: ${DIGEST_SIZE}/${MAX_DIGEST_CHARS} chars — run \`radioheader consolidate\` to regenerate]"
+  fi
   echo "--- end digest ---"
 fi
 

@@ -237,6 +237,11 @@ def load_user_profile(rdir: str) -> dict:
     return profile
 
 
+# Budget for context-digest (chars). Claude Code truncates instruction files
+# at ~4,000 chars each. We target 3,500 to leave headroom for loader delimiters.
+MAX_DIGEST_CHARS = 3500
+
+
 def generate_context_digest(rdir: str, registry: dict, search_log: list,
                             error_patterns: dict, today: datetime):
     """Generate context-digest.md — compressed environmental awareness for Agent.
@@ -324,6 +329,10 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
         if role:
             line += f" — {role}"
         lines.append(line)
+        # Scope annotation: project path for Agent navigation
+        proj_path = p.get("path", "")
+        if proj_path:
+            lines.append(f"  scope: `{proj_path}`")
         if problems:
             lines.append(f"  关注: {problems}")
         if pain:
@@ -396,10 +405,26 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
                 lines.append(f"- {label} ({p['count']} 次): `{p['snippet']}`")
             lines.append("")
 
+    # --- Budget-aware truncation ---
+    content = "\n".join(lines)
+    if len(content) > MAX_DIGEST_CHARS:
+        # Drop sections from bottom (lowest priority) until within budget
+        # Section markers: ## headers
+        section_splits = content.split("\n## ")
+        # First part is the header (always keep)
+        rebuilt = section_splits[0]
+        for part in section_splits[1:]:
+            candidate = rebuilt + "\n## " + part
+            if len(candidate) <= MAX_DIGEST_CHARS:
+                rebuilt = candidate
+            else:
+                break
+        content = rebuilt.rstrip() + "\n\n> [digest truncated — budget %d chars]" % MAX_DIGEST_CHARS
+
     # Write digest
     digest_path = os.path.join(rdir, "context-digest.md")
     with open(digest_path, "w") as f:
-        f.write("\n".join(lines))
+        f.write(content)
 
     return digest_path
 

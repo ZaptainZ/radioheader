@@ -4,7 +4,7 @@ set -e
 # RadioHeader CLI — Cross-project experience sharing for Claude Code
 # Usage: radioheader <command> [options]
 
-VERSION="1.4.0"
+VERSION="1.4.1"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"

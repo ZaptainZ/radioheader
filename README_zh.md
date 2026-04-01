@@ -56,7 +56,7 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **Learn（外部知识采集）** — RadioHeader 不只靠踩坑积累经验。`learn` 命令从任意 URL 提取文章——包括微信公众号、Medium、Substack 等封闭平台——并提炼为短波条目。这让 RadioHeader 从被动的经验管理器升级为 Claude Code 的主动**信息入口**：不只记住教训，而是主动从外部世界吸收知识。
 
-**环境认知摘要（注意力压缩）** — 灵感来自 [Kimi 的 Attention Residuals](https://github.com/MoonshotAI/Attention-Residuals) 研究。RadioHeader 构建一份压缩的环境认知画像，在每次会话开始时注入。注意力机制不作用于搜索排序（内容匹配已经足够好），而是作用于**记忆整合**层面——类似人类睡眠中的记忆巩固。每隔几次记忆同步，`consolidate` 自动运行，生成 `context-digest.md`，包含：用户特征（解题风格、长处、已知短板）、项目全景（每个项目做什么、当前痛点、活跃度）、近期搜索热点、跨项目技术交叉。Agent 每次会话一开始就知道自己在帮谁——不只是在看什么代码。
+**环境认知摘要（注意力压缩）** — 灵感来自 [Kimi 的 Attention Residuals](https://github.com/MoonshotAI/Attention-Residuals) 研究。RadioHeader 构建一份压缩的环境认知画像，在每次会话开始时注入。注意力机制不作用于搜索排序（内容匹配已经足够好），而是作用于**记忆整合**层面——类似人类睡眠中的记忆巩固。每隔几次记忆同步，`consolidate` 自动运行，生成 `context-digest.md`，包含：用户特征（解题风格、长处、已知短板）、带 **scope 标注**的项目全景（每个项目的路径，Agent 可直接导航）、近期搜索热点、跨项目技术交叉。摘要强制执行 **3,500 字符预算**（参考 Claude Code 内部 4K/文件的指令截断阈值）——项目增多时，低优先级 section 自动裁剪，loader hook 层还有二次兜底保护。Agent 每次会话一开始就知道自己在帮谁——不只是在看什么代码。
 
 **用户画像（三个维度）** — RadioHeader 跨三个维度维护用户模型：(1) **做过什么**——项目组合，每个项目的领域、问题和痛点，记录在 `project-registry.json`；(2) **怎么工作**——解题方式、交互偏好、已知长处和短板；(3) **有什么资源**——设备、网络环境、基础设施。这份画像是记忆整合的"查询向量"——决定了什么被强调、什么被关联、Agent 应该主动关注什么。
 
@@ -70,7 +70,7 @@ cd radioheader
 ./install.sh
 ```
 
-搞定。启动 Claude Code 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。
+搞定。启动 Claude Code 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。安装器具有容错能力：如果现有 `settings.json` 已损坏，会自动备份并重建，不会报错退出。
 
 可选：在某个项目中运行 `radioheader init` 可添加项目级脚手架（Echo 规则、日志目录、文档模板）。这不是必需的——RadioHeader 无需此步即可全局工作。
 

@@ -155,6 +155,28 @@ if [ -f "$SETTINGS_JSON" ]; then
   cp "$SETTINGS_JSON" "$SETTINGS_JSON.bak.$TIMESTAMP"
   ok "Backed up settings.json → settings.json.bak.$TIMESTAMP"
 
+  # Validate existing JSON — if corrupt, rebuild from scratch (inspired by
+  # Claude Code config.rs: legacy files are silently skipped on parse error)
+  SETTINGS_VALID=true
+  if command -v jq &>/dev/null; then
+    if ! jq empty "$SETTINGS_JSON" 2>/dev/null; then
+      warn "settings.json is not valid JSON — rebuilding (backup preserved at settings.json.bak.$TIMESTAMP)"
+      SETTINGS_VALID=false
+    fi
+  elif command -v python3 &>/dev/null; then
+    if ! python3 -c "import json; json.load(open('$SETTINGS_JSON'))" 2>/dev/null; then
+      warn "settings.json is not valid JSON — rebuilding (backup preserved at settings.json.bak.$TIMESTAMP)"
+      SETTINGS_VALID=false
+    fi
+  fi
+
+  if [ "$SETTINGS_VALID" = false ]; then
+    # Remove corrupt file — will be recreated in the else branch below
+    rm "$SETTINGS_JSON"
+  fi
+fi
+
+if [ -f "$SETTINGS_JSON" ]; then
   # Check if hooks already exist
   HAS_CHECK_HOOK=$(grep -c "check-project-architecture.sh" "$SETTINGS_JSON" 2>/dev/null || true)
   HAS_LOADER_HOOK=$(grep -c "radioheader-loader.sh" "$SETTINGS_JSON" 2>/dev/null || true)
