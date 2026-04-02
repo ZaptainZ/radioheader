@@ -182,7 +182,7 @@ def generate_readable_registry(registry: dict, rdir: str):
     lines = [
         "# 项目注册表",
         "",
-        "> 所有使用 Claude Code 管理的项目。新项目配置动态经验框架时应在此注册。",
+        "> 所有使用 Claude Code 管理的项目。新项目启用 RadioHeader 时应在此注册。",
         "> 此文件由 `radioheader consolidate` 自动生成，源数据在 `project-registry.json`。",
         "",
         "| 项目名 | 技术栈 | 状态 | 活跃度 | 注意力权重 | 搜索命中 |",
