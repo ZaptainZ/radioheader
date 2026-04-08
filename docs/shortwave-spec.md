@@ -155,6 +155,6 @@ When both shortwave and topics results are found:
 
 1. **Shortwave first** — more refined, project-agnostic, directly applicable
 2. **Topics for detail** — when shortwave summary isn't enough, trace to topics/ for richer context
-3. **Source project memory/** — when topics/ isn't enough, trace to source project via `refs` or `project-registry.md`
+3. **Source project memory/** — when topics/ isn't enough, trace to source project via `refs` or `project-registry.json` / `project-registry.md`
 
 > 搜到短波和 topics 结果时：短波优先（更精炼）→ topics 补细节 → 源项目 memory/ 追溯。

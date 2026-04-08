@@ -9,7 +9,7 @@
 command -v jq &>/dev/null || exit 0
 
 INPUT=$(cat)
-TOOL_RESULT=$(echo "$INPUT" | jq -r '.tool_result // empty' 2>/dev/null)
+TOOL_RESULT=$(echo "$INPUT" | jq -r '.tool_result // .tool_response // empty' 2>/dev/null)
 CWD=$(echo "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
 
 # Only process if there's an error signal in the result

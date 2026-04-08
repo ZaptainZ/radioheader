@@ -14,10 +14,10 @@
 
 **Project documentation obligations (for projects with the dynamic experience framework):**
 
-6. **Project info sync (MUST)**: If the project's architecture, key paths, tech stack, or important configurations changed during this session → MUST update the project overview document (the file listed as project overview in CLAUDE.md, typically `projectBasicInfo/01_PROJECT_OVERVIEW.md`). Do NOT skip this — stale project docs cause repeated re-exploration in future sessions.
-7. **Task logs (MUST)**: If you completed a significant task (bug fix, feature development, architecture change, deployment, refactoring) → MUST write a log entry in the project's logs directory (typically `projectBasicInfo/logs/YYYY-MM-DD-topic-cc.md`). Content: background, goal, approach, modified files, issues encountered, conclusion. This is NOT optional for significant work.
+6. **Project info sync (MUST)**: If the project's architecture, key paths, tech stack, or important configurations changed during this session → MUST update the project overview document (typically `projectBasicInfo/01_PROJECT_OVERVIEW.md`).
+7. **Task logs (MUST)**: If you completed a significant task (bug fix, feature development, architecture change, deployment, refactoring) → MUST write a log entry in the project's logs directory (typically `projectBasicInfo/logs/YYYY-MM-DD-topic-cc.md`).
 
-**PROHIBITED**: Completing significant work without checking items 6 and 7. The PostToolUse hook will remind you when memory/ is updated, but you MUST also check proactively at the end of a task series.
+**PROHIBITED**: Completing significant work without checking items 6 and 7. Hooks will reinforce this behavior, but you MUST also check proactively at the end of a task series.
 
 > memory/ is under `~/.claude/projects/`, MEMORY.md first 200 lines auto-loaded per session.
 
@@ -42,7 +42,7 @@ Use multiple synonymous keywords to increase hit rate (e.g. "white screen|slow l
 
 **Step 3: Trace**. If more details are needed, resolve the source project path from `project-registry.json` / `project-registry.md`, then read its `memory/` directory for full context.
 
-**PROHIBITED**: Finding relevant experience but not citing or applying it, jumping straight to independent analysis. RadioHeader's value is avoiding repeated pitfalls — finding but not using is the same as not searching.
+**PROHIBITED**: Finding relevant experience but not citing or applying it, jumping straight to independent analysis.
 
 - **Index**: `__HOME__/.claude/radioheader/INDEX.md`
 - **Project registry**: `__HOME__/.claude/radioheader/project-registry.json` (source of truth), `project-registry.md` (readable view)
@@ -69,6 +69,6 @@ Then automatically create the project structure using templates from RadioHeader
 
 ### If found (configured project)
 
-Start working directly, following the project's CLAUDE.md and rules/.
+Start working directly, following the project's `AGENTS.md` / `CLAUDE.md` and `.claude/rules/`.
 
 # --- RadioHeader END ---

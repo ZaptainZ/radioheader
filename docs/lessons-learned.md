@@ -6,7 +6,7 @@ RadioHeader was developed through real-world usage across 13 projects. This docu
 
 **The problem**: Early RadioHeader told Claude to "search RadioHeader when facing a technical problem." Claude would dutifully search, find 3 topic files with 4 matching lines, and then completely ignore all of it — proceeding with independent analysis from scratch.
 
-**Why it happened**: The CLAUDE.md rule only specified the **search** action, not what to do with the results. Claude treated the search as a checkbox to tick, not as input to its analysis.
+**Why it happened**: The runtime rule only specified the **search** action, not what to do with the results. The agent treated the search as a checkbox to tick, not as input to its analysis.
 
 **The fix**: Replace the single "search" instruction with a three-step mandatory behavioral rule:
 
@@ -48,7 +48,7 @@ Fix: Task.detached(priority:)
 
 ## Lesson 3: Instructions Beat Knowledge
 
-**The problem**: The first version of RadioHeader's CLAUDE.md section was informational:
+**The problem**: The first version of RadioHeader's runtime instruction section was informational:
 
 ```
 ## RadioHeader (Cross-Project Experience Hub)
@@ -67,11 +67,11 @@ Claude treated this as background information — nice to know, optional to act 
 **PROHIBITED**: Finding relevant experience but not citing or applying it.
 ```
 
-**Takeaway**: In CLAUDE.md, every instruction that should drive behavior must be phrased as a mandate with "MUST", "ALWAYS", or "PROHIBITED". Informational descriptions create awareness, not action.
+**Takeaway**: In `CLAUDE.md` / `AGENTS.md`, every instruction that should drive behavior must be phrased as a mandate with "MUST", "ALWAYS", or "PROHIBITED". Informational descriptions create awareness, not action.
 
 ## Lesson 4: Session Hooks Provide Critical Context
 
-**The problem**: Even with rules in CLAUDE.md, Claude sometimes "forgot" about RadioHeader because the rules were buried in a long file.
+**The problem**: Even with rules in the runtime instruction file, the agent sometimes "forgot" about RadioHeader because the rules were buried in a long file.
 
 **The fix**: A SessionStart hook that prints:
 
@@ -83,7 +83,7 @@ Claude treated this as background information — nice to know, optional to act 
 
 This provides a visible, session-start reminder that RadioHeader exists and how to use it.
 
-**Takeaway**: CLAUDE.md rules set the behavior; hooks reinforce it with timely context.
+**Takeaway**: Runtime rules set the behavior; hooks reinforce it with timely context.
 
 ## Lesson 5: New Project Detection Enables Organic Growth
 
@@ -97,7 +97,7 @@ This provides a visible, session-start reminder that RadioHeader exists and how 
 
 **The problem**: A RadioHeader entry says `[source:MyApp]` — but where is MyApp? What's its path? What other context does its memory/ have?
 
-**The fix**: `project-registry.md` maps project names to filesystem paths and tech stacks. When Claude needs to trace an experience back to its source, it looks up the path and reads the source project's memory files.
+**The fix**: `project-registry.json` stores project names, filesystem paths, and metadata; `project-registry.md` is the human-readable projection. When the agent needs to trace an experience back to its source, it resolves the path there and reads the source project's memory files.
 
 **Takeaway**: Source tagging is only useful if there's a way to resolve the tag to a location.
 

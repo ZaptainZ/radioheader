@@ -1,6 +1,6 @@
 # RadioHeader
 
-**让 Claude Code 拥有跨项目记忆。** 在项目 A 踩过的坑，项目 B 不必再踩。
+**让 Claude Code 和 Codex 拥有跨项目记忆。** 在项目 A 踩过的坑，项目 B 不必再踩。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
@@ -48,11 +48,11 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **三层记忆模型** — RadioHeader（全局共享）→ 项目 memory/（项目专属）→ 会话上下文（临时）。经验从项目流向全局中枢，再流回到需要它的地方。
 
-**Echo（经验回流）** — 完成任务后，经验自动流回记忆系统。四个 hooks 驱动完整闭环：SessionStart 显示状态、PostToolUse 检测 memory 写入并触发 Echo、Stop 提醒检查新经验。不需要手动操作。
+**Echo（经验回流）** — 完成任务后，经验自动流回记忆系统。RadioHeader 现已支持双 runtime：Claude 走原生写入 hooks，Codex 走 UserPromptSubmit 快照加 Stop continuation 补偿闭环。不需要手动操作。
 
 **Shortwave（知识短波）** — Topic 条目含项目细节（`[source:MyApp]`）。短波去掉项目名、文件路径、框架细节，提炼为通用的、项目无关的知识单元——跨技术栈可搜索。这也是在保护隐私：原始条目可能包含项目路径、内部命名甚至 API key，短波会把这些全部剥离。
 
-**搜 → 用 → 追** — 不是建议，是注入 CLAUDE.md 的强制行为规则。搜到相关经验就**必须引用并应用**，搜到不用是被明确禁止的。
+**搜 → 用 → 追** — 不是建议，是注入 `CLAUDE.md` 和 `AGENTS.md` 的强制行为规则。搜到相关经验就**必须引用并应用**，搜到不用是被明确禁止的。
 
 **Learn（外部知识采集）** — RadioHeader 不只靠踩坑积累经验。`learn` 命令从任意 URL 提取文章——包括微信公众号、Medium、Substack 等封闭平台——并提炼为短波条目。这让 RadioHeader 从被动的经验管理器升级为 Claude Code 的主动**信息入口**：不只记住教训，而是主动从外部世界吸收知识。
 
@@ -67,10 +67,14 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 ```bash
 git clone https://github.com/ZaptainZ/radioheader.git
 cd radioheader
-./install.sh
+./install.sh --runtime both
 ```
 
-搞定。启动 Claude Code 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。安装器具有容错能力：如果现有 `settings.json` 已损坏，会自动备份并重建，不会报错退出。
+搞定。启动 Claude Code 或 Codex 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。安装器具有容错能力：如果现有 `settings.json` 已损坏，会自动备份并重建，不会报错退出。
+
+运行时说明：
+- `--runtime claude|codex|both` 控制安装哪套 runtime 适配层，默认是 `both`
+- Codex 支持当前以 `codex-cli 0.118.0+` 为目标版本
 
 可选：在某个项目中运行 `radioheader init` 可添加项目级脚手架（Echo 规则、日志目录、文档模板）。这不是必需的——RadioHeader 无需此步即可全局工作。
 
@@ -91,7 +95,7 @@ RadioHeader (~/.claude/radioheader/)
 项目 A memory/       项目 B memory/       SessionStart（自动注入）
 ```
 
-修 bug 时，Claude 先记录到项目的 memory/ 中。PostToolUse hook 触发后，Claude 判断：*这条经验跨项目有用吗？* 如果是，写入 `topics/` 并标注 `[source:项目名]`，然后精炼为 `shortwave/` 条目。
+修 bug 时，runtime 会先把经验记到项目的 memory/ 中。Claude 用 PostToolUse 立即触发 Echo 检查；Codex 则在 turn 结束时通过 Stop hook continuation 补齐 Echo / shortwave。若这条经验跨项目有用，就写入 `topics/` 并标注 `[source:项目名]`，再精炼为 `shortwave/` 条目。
 
 三层这样接上：经验先通过 **Echo** 回到 **RadioHeader**，再由 **Shortwave** 去掉项目噪音，变成可广播的通用知识。
 
@@ -168,7 +172,7 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 
 | 命令 | 功能 |
 |------|------|
-| `radioheader init` | 在项目中初始化经验框架 |
+| `radioheader init` | 在项目中初始化经验框架（`--runtime claude|codex|both`） |
 | `radioheader search <关键词>` | 搜索 topics、shortwave 和社区库 |
 | `radioheader index [--rebuild]` | 构建/更新 FTS5 搜索索引（BM25 + 同义词） |
 | `radioheader learn <url>` | 提取网页文章并生成短波条目 |
@@ -192,7 +196,7 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 radioheader search "白屏|启动慢|startup"
 
 # 用参数模式初始化项目
-radioheader init --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
+radioheader init --runtime both --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
 
 # 开启社区并同步
 radioheader community on
@@ -207,7 +211,7 @@ radioheader sync
 
 **症状关键词 > 解法关键词。** 开发者搜的是"白屏"、"启动慢"，不是"Task.detached"。经验条目如果删掉了症状词，就再也搜不到了。每条经验必须保留用户实际会搜索的词。
 
-**指令胜过知识。** 写"经验存在这里"不会驱动行为，写"你必须先搜这里"才会。CLAUDE.md 的内容必须是强制性行为指令，不是参考文档。
+**指令胜过知识。** 写"经验存在这里"不会驱动行为，写"你必须先搜这里"才会。`CLAUDE.md` / `AGENTS.md` 的内容必须是强制性行为指令，不是参考文档。
 
 **注意力属于记忆压缩，不属于搜索。** 我们最初把注意力权重加到搜索结果上（提升活跃项目的条目排名）。测试发现排序变化为零——BM25 内容匹配已经给出了正确结果。注意力真正的价值在于记忆整合：将用户的项目全景、行为模式和已知短板压缩成一份摘要，影响的是 Agent 怎么思考，而不是搜到什么。
 

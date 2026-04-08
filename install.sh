@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# RadioHeader — Cross-project memory framework for Claude Code
+# RadioHeader — Cross-project memory framework for Claude Code and Codex
 # https://github.com/anthropics/radioheader
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,7 +10,11 @@ RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
+CODEX_DIR="$HOME/.codex"
+CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
+CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
+RUNTIME="both"
 
 # Colors
 RED='\033[0;31m'
@@ -24,13 +28,127 @@ ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[RadioHeader]${NC} $1"; }
 err()   { echo -e "${RED}[RadioHeader]${NC} $1"; }
 
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --runtime)
+      RUNTIME="$2"
+      shift 2
+      ;;
+    --runtime=*)
+      RUNTIME="${1#*=}"
+      shift
+      ;;
+    --help|-h)
+      cat <<EOF
+Usage: ./install.sh [--runtime claude|codex|both]
+EOF
+      exit 0
+      ;;
+    *)
+      err "Unknown flag: $1"
+      exit 1
+      ;;
+  esac
+done
+
+case "$RUNTIME" in
+  claude|codex|both) ;;
+  *)
+    err "Invalid runtime: $RUNTIME (expected claude, codex, or both)"
+    exit 1
+    ;;
+esac
+
+claude_enabled() {
+  [ "$RUNTIME" = "claude" ] || [ "$RUNTIME" = "both" ]
+}
+
+codex_enabled() {
+  [ "$RUNTIME" = "codex" ] || [ "$RUNTIME" = "both" ]
+}
+
+append_managed_section() {
+  local target="$1"
+  local template="$2"
+  local label="$3"
+  if [ -f "$target" ]; then
+    if grep -q "RadioHeader START" "$target" 2>/dev/null; then
+      warn "Updating existing RadioHeader section in $label"
+      cp "$target" "$target.bak.$TIMESTAMP"
+      sed '/^# --- RadioHeader START ---$/,/^# --- RadioHeader END ---$/d' "$target.bak.$TIMESTAMP" > "$target"
+    else
+      cp "$target" "$target.bak.$TIMESTAMP"
+      ok "Backed up $label → $(basename "$target").bak.$TIMESTAMP"
+    fi
+  else
+    mkdir -p "$(dirname "$target")"
+    touch "$target"
+    info "Created new $label"
+  fi
+
+  echo "" >> "$target"
+  sed "s|__HOME__|$HOME|g" "$template" >> "$target"
+}
+
+merge_codex_hooks() {
+  python3 - <<PY
+import json, os
+path = os.path.expanduser("$CODEX_HOOKS_JSON")
+backup = f"{path}.bak.$TIMESTAMP"
+data = {}
+if os.path.exists(path):
+    with open(path) as f:
+        try:
+            data = json.load(f)
+        except Exception:
+            os.replace(path, backup)
+            data = {}
+hooks = data.setdefault("hooks", {})
+changed = False
+
+def add(event, entry):
+    global changed
+    arr = hooks.setdefault(event, [])
+    if entry not in arr:
+        arr.append(entry)
+        changed = True
+
+add("SessionStart", {
+    "matcher": "startup|resume",
+    "hooks": [
+        {"type": "command", "command": "~/.claude/hooks/check-project-architecture.sh"},
+        {"type": "command", "command": "~/.claude/hooks/radioheader-loader.sh"},
+    ],
+})
+add("PostToolUse", {
+    "matcher": "Bash",
+    "hooks": [
+        {"type": "command", "command": "~/.claude/hooks/radioheader-error-capture.sh"}
+    ],
+})
+add("UserPromptSubmit", {
+    "hooks": [
+        {"type": "command", "command": "~/.claude/hooks/radioheader-codex-userprompt.py"}
+    ],
+})
+add("Stop", {
+    "hooks": [
+        {"type": "command", "command": "~/.claude/hooks/radioheader-stop-codex.py"}
+    ],
+})
+
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\\n")
+print("changed" if changed else "unchanged")
+PY
+}
+
 # --- Pre-checks ---
 
-if [ ! -d "$CLAUDE_DIR" ]; then
-  err "~/.claude/ directory not found. Is Claude Code installed?"
-  err "Install Claude Code first: https://docs.anthropic.com/en/docs/claude-code"
-  exit 1
-fi
+mkdir -p "$CLAUDE_DIR"
+mkdir -p "$CODEX_DIR"
 
 if [ -d "$RADIOHEADER_DIR" ]; then
   warn "RadioHeader is already installed at $RADIOHEADER_DIR"
@@ -42,7 +160,7 @@ if [ -d "$RADIOHEADER_DIR" ]; then
   fi
 fi
 
-info "Installing RadioHeader..."
+info "Installing RadioHeader (runtime: $RUNTIME)..."
 
 # --- Step 1: Create radioheader directory ---
 
@@ -123,35 +241,29 @@ chmod +x "$HOOKS_DIR/radioheader-stop-echo.sh"
 cp "$SCRIPT_DIR/templates/hooks/radioheader-error-capture.sh" "$HOOKS_DIR/radioheader-error-capture.sh"
 chmod +x "$HOOKS_DIR/radioheader-error-capture.sh"
 
-ok "Installed hook scripts (5 hooks)"
+cp "$SCRIPT_DIR/templates/hooks/radioheader-codex-userprompt.py" "$HOOKS_DIR/radioheader-codex-userprompt.py"
+chmod +x "$HOOKS_DIR/radioheader-codex-userprompt.py"
+
+cp "$SCRIPT_DIR/templates/hooks/radioheader-stop-codex.py" "$HOOKS_DIR/radioheader-stop-codex.py"
+chmod +x "$HOOKS_DIR/radioheader-stop-codex.py"
+
+ok "Installed hook scripts (7 hooks)"
 
 # --- Step 3: Append rules to CLAUDE.md ---
 
-if [ -f "$CLAUDE_MD" ]; then
-  if grep -q "RadioHeader START" "$CLAUDE_MD" 2>/dev/null; then
-    # Remove existing RadioHeader section and re-add
-    warn "Updating existing RadioHeader section in CLAUDE.md"
-    cp "$CLAUDE_MD" "$CLAUDE_MD.bak.$TIMESTAMP"
-    # Use sed to remove the section between markers
-    sed '/^# --- RadioHeader START ---$/,/^# --- RadioHeader END ---$/d' "$CLAUDE_MD.bak.$TIMESTAMP" > "$CLAUDE_MD"
-  else
-    cp "$CLAUDE_MD" "$CLAUDE_MD.bak.$TIMESTAMP"
-    ok "Backed up CLAUDE.md → CLAUDE.md.bak.$TIMESTAMP"
-  fi
-else
-  touch "$CLAUDE_MD"
-  info "Created new CLAUDE.md"
+if claude_enabled; then
+  append_managed_section "$CLAUDE_MD" "$SCRIPT_DIR/templates/global-claude-md.md" "CLAUDE.md"
+  ok "Added RadioHeader rules to CLAUDE.md"
 fi
 
-# Append RadioHeader rules with __HOME__ replaced
-echo "" >> "$CLAUDE_MD"
-sed "s|__HOME__|$HOME|g" "$SCRIPT_DIR/templates/global-claude-md.md" >> "$CLAUDE_MD"
-
-ok "Added RadioHeader rules to CLAUDE.md"
+if codex_enabled; then
+  append_managed_section "$CODEX_AGENTS" "$SCRIPT_DIR/templates/global-agents-md.md" "AGENTS.md"
+  ok "Added RadioHeader rules to ~/.codex/AGENTS.md"
+fi
 
 # --- Step 4: Merge hooks into settings.json ---
 
-if [ -f "$SETTINGS_JSON" ]; then
+if claude_enabled && [ -f "$SETTINGS_JSON" ]; then
   cp "$SETTINGS_JSON" "$SETTINGS_JSON.bak.$TIMESTAMP"
   ok "Backed up settings.json → settings.json.bak.$TIMESTAMP"
 
@@ -176,7 +288,7 @@ if [ -f "$SETTINGS_JSON" ]; then
   fi
 fi
 
-if [ -f "$SETTINGS_JSON" ]; then
+if claude_enabled && [ -f "$SETTINGS_JSON" ]; then
   # Check if hooks already exist
   HAS_CHECK_HOOK=$(grep -c "check-project-architecture.sh" "$SETTINGS_JSON" 2>/dev/null || true)
   HAS_LOADER_HOOK=$(grep -c "radioheader-loader.sh" "$SETTINGS_JSON" 2>/dev/null || true)
@@ -264,7 +376,8 @@ HOOKS_HELP
       warn "Or install jq (brew install jq / apt install jq) and re-run this script."
     fi
   fi
-else
+elif claude_enabled
+then
   # Create settings.json from scratch
   cat > "$SETTINGS_JSON" << 'SETTINGS_EOF'
 {
@@ -321,6 +434,15 @@ else
 }
 SETTINGS_EOF
   ok "Created settings.json with hooks"
+fi
+
+if codex_enabled; then
+  CODEX_HOOK_STATUS=$(merge_codex_hooks)
+  if [ "$CODEX_HOOK_STATUS" = "changed" ]; then
+    ok "Merged hooks into ~/.codex/hooks.json"
+  else
+    ok "Hooks already configured in ~/.codex/hooks.json"
+  fi
 fi
 
 # --- Step 5: Install CLI ---
@@ -435,7 +557,13 @@ echo -e "${GREEN}  RadioHeader installed successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "What's next:"
-echo "  1. Open any project with Claude Code — RadioHeader is already active"
+if [ "$RUNTIME" = "both" ]; then
+  echo "  1. Open any project with Claude Code or Codex — RadioHeader is already active"
+elif [ "$RUNTIME" = "claude" ]; then
+  echo "  1. Open any project with Claude Code — RadioHeader is already active"
+else
+  echo "  1. Open any project with Codex — RadioHeader is already active"
+fi
 echo "  2. Optionally run 'radioheader init' inside a project for per-project scaffolding"
 if [ "$COMMUNITY_ENABLED" = "true" ]; then
 echo "  3. Run 'radioheader sync' to download the community library"
@@ -457,7 +585,13 @@ echo ""
 echo "Paths:"
 echo "  RadioHeader:  $RADIOHEADER_DIR/"
 echo "  Hooks:        $HOOKS_DIR/"
-echo "  Rules:        $CLAUDE_MD"
+if claude_enabled; then
+echo "  Claude rules: $CLAUDE_MD"
+fi
+if codex_enabled; then
+echo "  Codex rules:  $CODEX_AGENTS"
+echo "  Codex hooks:  $CODEX_HOOKS_JSON"
+fi
 echo "  CLI:          $CLI_INSTALLED"
 echo ""
 echo "Backups (if any) have a .bak.$TIMESTAMP suffix."

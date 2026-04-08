@@ -14,7 +14,7 @@ if [ ! -f "$MARKER_FILE" ]; then
   echo "  Before starting work, ask the user:"
   echo "  'Would you like to enable RadioHeader?'"
   echo ""
-  echo "  See the RadioHeader section in ~/.claude/CLAUDE.md for details."
+  echo "  See the RadioHeader global instructions for details."
   echo "================================================================"
   echo ""
 fi
