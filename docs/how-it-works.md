@@ -4,11 +4,11 @@
 
 RadioHeader is a behavioral framework, not a database. It works by:
 
-1. Injecting mandatory behavioral rules into Claude Code's global `CLAUDE.md`
-2. Using session hooks to provide context at startup
-3. Relying on Claude Code's existing `Grep` tool for search
+1. Injecting mandatory behavioral rules into the runtime entry file (`CLAUDE.md` for Claude, `AGENTS.md` for Codex)
+2. Using runtime hooks to provide context and reinforcement during the session lifecycle
+3. Relying on the agent's existing search tools (`Grep`, `Glob`, etc.) against plain files
 
-There is no daemon, no API, no external service. Everything runs through Claude Code's native hook system and file-based configuration.
+There is no daemon, no API, no external service. Everything runs through the agent runtime's native hook system and file-based configuration.
 
 ## Architecture
 
@@ -34,7 +34,10 @@ Each layer has a different scope and lifetime. RadioHeader occupies the top laye
 
 ### Components
 
-**Global CLAUDE.md rules** (`~/.claude/CLAUDE.md`)
+**Global runtime rules**
+
+- Claude: `~/.claude/CLAUDE.md`
+- Codex: `~/.codex/AGENTS.md`
 
 The core of RadioHeader. Appended between `# --- RadioHeader START ---` and `# --- RadioHeader END ---` markers. Contains:
 
@@ -43,12 +46,17 @@ The core of RadioHeader. Appended between `# --- RadioHeader START ---` and `# -
 - New project onboarding flow
 - Prohibition on finding but not using results
 
-**Session hooks** (`~/.claude/hooks/`)
+**Shared hook scripts** (`~/.claude/hooks/`)
 
-Two hooks fire at every session start:
+Claude and Codex both point to the same shared hook script directory, but they trigger different events:
 
-1. `radioheader-loader.sh` — Prints topic file count and search instructions
-2. `check-project-architecture.sh` — Checks if the current project has the dynamic experience framework configured; if not, prompts the agent to ask the user
+- `check-project-architecture.sh` — checks if the current project has the dynamic experience framework configured
+- `radioheader-loader.sh` — prints topic counts and context-digest info
+- `radioheader-memory-sync.sh` — Claude-only `PostToolUse Write|Edit` Echo trigger
+- `radioheader-error-capture.sh` — Bash error capture
+- `radioheader-codex-userprompt.py` — Codex `UserPromptSubmit` snapshot
+- `radioheader-stop-echo.sh` — Claude Stop reminder
+- `radioheader-stop-codex.py` — Codex Stop compensation and reminders
 
 **Topic files** (`~/.claude/radioheader/topics/*.md`)
 
@@ -61,7 +69,8 @@ Plain Markdown files organized by technology or domain. Each entry is one line:
 **Index and registry**
 
 - `INDEX.md` — Lists all topic files with entry counts
-- `project-registry.md` — Maps project names to paths and tech stacks
+- `project-registry.json` — Structured source of truth for project paths and metadata
+- `project-registry.md` — Human-readable projection generated from the JSON registry
 
 ### Per-Project Structure
 
@@ -70,14 +79,20 @@ When the dynamic experience framework is enabled for a project:
 ```
 project/
 ├── .claude/
-│   ├── settings.json              # Project-level SessionStart + Stop hooks
+│   ├── settings.json              # Claude project hooks
 │   ├── hooks/
 │   │   └── load-project-rules.sh  # Startup message
 │   └── rules/
-│       ├── memory-echo.md       # Echo rules (project + global)
+│       ├── memory-echo.md         # Echo rules (project + global)
 │       ├── logs-writing.md        # Log writing rules
 │       └── information-lookup.md  # Five-step search strategy
-├── CLAUDE.md                      # Project entry point
+├── .codex/
+│   ├── hooks.json                 # Codex project hooks
+│   └── hooks/
+│       ├── load-project-rules.sh  # Startup reminder
+│       └── stop-reminder.py       # Project-level Stop reminder
+├── CLAUDE.md                      # Claude project entry point
+├── AGENTS.md                      # Codex project entry point
 └── {doc-dir}/
     ├── 00_AGENT_RULES.md
     ├── 01_PROJECT_OVERVIEW.md
@@ -87,7 +102,7 @@ project/
 The `information-lookup.md` rule enforces a search hierarchy:
 
 1. Check already-loaded context (MEMORY.md, rules/)
-2. Consult CLAUDE.md document index
+2. Consult the project document index (`CLAUDE.md` / `AGENTS.md`)
 3. Use Grep/Glob for targeted search
 4. Read matched files
 5. Use Explore agent (last resort only)
@@ -96,7 +111,7 @@ The `information-lookup.md` rule enforces a search hierarchy:
 
 ### Why "MUST" Rules Work
 
-Claude Code's CLAUDE.md is loaded as system-level instructions. Content phrased as behavioral mandates ("you MUST search") is treated as imperative by the model. Content phrased as information ("experience is stored here") is treated as optional background.
+The runtime instruction file is loaded as high-priority guidance. Content phrased as behavioral mandates ("you MUST search") is treated as imperative by the model. Content phrased as information ("experience is stored here") is treated as optional background.
 
 RadioHeader uses imperative phrasing throughout:
 
@@ -108,11 +123,11 @@ RadioHeader uses imperative phrasing throughout:
 
 This three-step pattern was developed after discovering that Claude would search RadioHeader, find results, and then ignore them entirely:
 
-**Step 1 — Search**: Use `Grep` with multiple synonymous keywords against `~/.claude/radioheader/topics/`. Multiple keywords increase hit rate (e.g., "white screen|slow launch|loading|startup").
+**Step 1 — Search**: Use `Grep` with multiple synonymous keywords against `~/.claude/radioheader/topics/` and `shortwave/`. Multiple keywords increase hit rate (e.g., "white screen|slow launch|loading|startup").
 
 **Step 2 — Apply**: If relevant entries are found, cite them explicitly ("RadioHeader has experience from {source}: {summary}"). Check each match for applicability. If an entry points to a solution, verify it before doing independent analysis.
 
-**Step 3 — Trace**: If more detail is needed, look up the source project in `project-registry.md` and read its `memory/` directory for full context.
+**Step 3 — Trace**: If more detail is needed, look up the source project in `project-registry.json` / `project-registry.md` and read its `memory/` directory for full context.
 
 ### Echo (Experience Flows Back)
 
@@ -125,10 +140,13 @@ After completing a task series (bug fix, feature, deployment), the agent checks:
 
 The Stop hook provides a reminder: "Check if new experience should echo back to memory/".
 
+In Claude, this reminder is a plain Stop message. In Codex, the Stop hook can also inspect the current turn and continue the loop if `memory -> topics -> shortwave` is incomplete.
+
 ## What RadioHeader Does NOT Do
 
 - **No automatic extraction**: Experience is written by Claude during sessions, not batch-processed
+- **No separate Codex datastore**: Claude and Codex share the same `~/.claude/radioheader/` data layer
 - **No deduplication**: You manage topic files manually or let Claude maintain them
 - **No version control**: Topic files are plain text; use git if you want history
-- **No cloud sync**: Everything is local to `~/.claude/`
+- **No mandatory cloud sync**: Everything works locally under `~/.claude/` and runtime config files
 - **No model fine-tuning**: RadioHeader works through prompting and behavioral rules, not training

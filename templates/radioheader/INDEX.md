@@ -4,7 +4,7 @@
 
 ## How to Use
 - Search: `Grep pattern="keyword" path="~/.claude/radioheader/topics/"`
-- Trace: Each entry is tagged `[source:ProjectName]`, find project path in `project-registry.md`
+- Trace: Each entry is tagged `[source:ProjectName]`, resolve project path from `project-registry.json` / `project-registry.md`
 - Deep dive: Read the source project's `memory/` directory for full context
 
 ## Topic Index
@@ -14,4 +14,4 @@
 | *(add your topics here)* | | |
 
 ## Project Registry
-→ See `project-registry.md`
+→ See `project-registry.json` (source of truth) and `project-registry.md` (readable view)

@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash -c 'ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); /bin/bash \"$ROOT/.codex/hooks/load-project-rules.sh\"'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/bin/bash -c 'ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); python3 \"$ROOT/.codex/hooks/stop-reminder.py\"'"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# RadioHeader CLI — Cross-project experience sharing for Claude Code
+# RadioHeader CLI — Cross-project experience sharing for Claude Code and Codex
 # Usage: radioheader <command> [options]
 
-VERSION="1.4.1"
+VERSION="2.0.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -17,6 +17,9 @@ PENDING_VOTES="$RADIOHEADER_DIR/pending-votes.jsonl"
 REGISTRY="$RADIOHEADER_DIR/project-registry.md"
 REGISTRY_JSON="$RADIOHEADER_DIR/project-registry.json"
 INDEX="$RADIOHEADER_DIR/INDEX.md"
+CODEX_DIR="$HOME/.codex"
+CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
+CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 
 # Default community repository (users can override in config.json)
 DEFAULT_COMMUNITY_REPO="https://github.com/ZaptainZ/radioheader-community.git"
@@ -35,6 +38,18 @@ info()  { echo -e "${BLUE}[RadioHeader]${NC} $1"; }
 ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[RadioHeader]${NC} $1"; }
 err()   { echo -e "${RED}[RadioHeader]${NC} $1"; }
+
+project_runtime_summary() {
+  local modes=()
+  [ -f "CLAUDE.md" ] && modes+=("claude")
+  [ -f "AGENTS.md" ] && modes+=("codex")
+  if [ "${#modes[@]}" -eq 0 ]; then
+    echo "none"
+  else
+    local joined="${modes[*]}"
+    echo "${joined// /, }"
+  fi
+}
 
 # ============================================================
 # config helpers (JSON read/write without jq dependency)
@@ -111,7 +126,7 @@ cmd_help() {
   cat <<EOF
 
 ${BOLD}RadioHeader CLI${NC} v${VERSION}
-Cross-project experience sharing for Claude Code
+Cross-project experience sharing for Claude Code and Codex
 
 ${BOLD}USAGE${NC}
   radioheader <command> [options]
@@ -136,6 +151,7 @@ ${BOLD}COMMANDS${NC}
 ${BOLD}EXAMPLES${NC}
   radioheader init
   radioheader init --name "MyApp" --stack "iOS/SwiftUI"
+  radioheader init --runtime both --name "MyApp" --stack "iOS/SwiftUI"
   radioheader search "NavigationStack"
   radioheader search "白屏"                        # auto synonym expansion
   radioheader search --field=tags "NavigationStack"
@@ -172,6 +188,7 @@ cmd_init() {
   local tech_stack=""
   local doc_dir="projectBasicInfo"
   local terminology="(none)"
+  local runtime="both"
 
   # Parse flags
   while [[ $# -gt 0 ]]; do
@@ -180,6 +197,7 @@ cmd_init() {
       --stack)    tech_stack="$2"; shift 2 ;;
       --doc-dir)  doc_dir="$2"; shift 2 ;;
       --terms)    terminology="$2"; shift 2 ;;
+      --runtime)  runtime="$2"; shift 2 ;;
       --help|-h)
         cat <<EOF
 ${BOLD}radioheader init${NC} — Initialize dynamic experience framework
@@ -189,6 +207,7 @@ ${BOLD}FLAGS${NC}
   --stack <stack>    Tech stack, e.g. "iOS/SwiftUI" (required)
   --doc-dir <dir>   Documentation directory name (default: projectBasicInfo)
   --terms <terms>   Terminology mappings (optional)
+  --runtime <mode>  claude | codex | both (default: both)
 
 ${BOLD}INTERACTIVE MODE${NC}
   Run without flags to be prompted for each value.
@@ -209,6 +228,14 @@ EOF
     return 1
   fi
 
+  case "$runtime" in
+    claude|codex|both) ;;
+    *)
+      err "Invalid runtime: $runtime (expected claude, codex, or both)"
+      return 1
+      ;;
+  esac
+
   if [ ! -d "$TEMPLATES_DIR" ]; then
     err "Project templates not found at $TEMPLATES_DIR"
     err "Re-run install.sh to install templates."
@@ -216,8 +243,8 @@ EOF
   fi
 
   # Check if already initialized
-  if [ -f ".claude/rules/memory-echo.md" ]; then
-    warn "This project appears to be already initialized (.claude/rules/memory-echo.md exists)."
+  if [ -f ".claude/rules/memory-echo.md" ] || [ -f "CLAUDE.md" ] || [ -f "AGENTS.md" ]; then
+    warn "This project appears to be already initialized."
     read -p "Re-initialize? Existing files will NOT be overwritten. [y/N] " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -266,42 +293,96 @@ EOF
   info "Initializing project: ${BOLD}$project_name${NC}"
   info "Tech stack: $tech_stack"
   info "Doc directory: $doc_dir"
+  info "Runtime: $runtime"
 
   # --- Create directory structure ---
 
   mkdir -p ".claude/hooks"
   mkdir -p ".claude/rules"
+  mkdir -p ".codex/hooks"
   mkdir -p "$doc_dir/logs"
 
   # --- Copy and process template files ---
 
   # CLAUDE.md
-  if [ -f "CLAUDE.md" ]; then
-    warn "CLAUDE.md already exists, skipping (not overwriting)"
-  else
-    cp "$TEMPLATES_DIR/CLAUDE.md.template" "CLAUDE.md"
-    sedi "s|__PROJECT_NAME__|$project_name|g" "CLAUDE.md"
-    sedi "s|__TECH_STACK__|$tech_stack|g" "CLAUDE.md"
-    sedi "s|__TERMINOLOGY__|$terminology|g" "CLAUDE.md"
-    sedi "s|__DOC_DIR__|$doc_dir|g" "CLAUDE.md"
-    ok "Created CLAUDE.md"
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+    if [ -f "CLAUDE.md" ]; then
+      warn "CLAUDE.md already exists, skipping (not overwriting)"
+    else
+      cp "$TEMPLATES_DIR/CLAUDE.md.template" "CLAUDE.md"
+      sedi "s|__PROJECT_NAME__|$project_name|g" "CLAUDE.md"
+      sedi "s|__TECH_STACK__|$tech_stack|g" "CLAUDE.md"
+      sedi "s|__TERMINOLOGY__|$terminology|g" "CLAUDE.md"
+      sedi "s|__DOC_DIR__|$doc_dir|g" "CLAUDE.md"
+      ok "Created CLAUDE.md"
+    fi
+  fi
+
+  # AGENTS.md
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+    if [ -f "AGENTS.md" ]; then
+      warn "AGENTS.md already exists, skipping (not overwriting)"
+    else
+      cp "$TEMPLATES_DIR/AGENTS.md.template" "AGENTS.md"
+      sedi "s|__PROJECT_NAME__|$project_name|g" "AGENTS.md"
+      sedi "s|__TECH_STACK__|$tech_stack|g" "AGENTS.md"
+      sedi "s|__TERMINOLOGY__|$terminology|g" "AGENTS.md"
+      sedi "s|__DOC_DIR__|$doc_dir|g" "AGENTS.md"
+      ok "Created AGENTS.md"
+    fi
   fi
 
   # .claude/settings.json
-  if [ -f ".claude/settings.json" ]; then
-    warn ".claude/settings.json already exists, skipping"
-  else
-    cp "$TEMPLATES_DIR/dot-claude/settings.json" ".claude/settings.json"
-    ok "Created .claude/settings.json"
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+    if [ -f ".claude/settings.json" ]; then
+      warn ".claude/settings.json already exists, skipping"
+    else
+      cp "$TEMPLATES_DIR/dot-claude/settings.json" ".claude/settings.json"
+      ok "Created .claude/settings.json"
+    fi
+  fi
+
+  # .codex/hooks.json
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+    if [ -f ".codex/hooks.json" ]; then
+      warn ".codex/hooks.json already exists, skipping"
+    else
+      cp "$TEMPLATES_DIR/dot-codex/hooks.json" ".codex/hooks.json"
+      ok "Created .codex/hooks.json"
+    fi
   fi
 
   # .claude/hooks/load-project-rules.sh
-  if [ -f ".claude/hooks/load-project-rules.sh" ]; then
-    warn ".claude/hooks/load-project-rules.sh already exists, skipping"
-  else
-    cp "$TEMPLATES_DIR/dot-claude/hooks/load-project-rules.sh" ".claude/hooks/load-project-rules.sh"
-    chmod +x ".claude/hooks/load-project-rules.sh"
-    ok "Created .claude/hooks/load-project-rules.sh"
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+    if [ -f ".claude/hooks/load-project-rules.sh" ]; then
+      warn ".claude/hooks/load-project-rules.sh already exists, skipping"
+    else
+      cp "$TEMPLATES_DIR/dot-claude/hooks/load-project-rules.sh" ".claude/hooks/load-project-rules.sh"
+      chmod +x ".claude/hooks/load-project-rules.sh"
+      ok "Created .claude/hooks/load-project-rules.sh"
+    fi
+  fi
+
+  # .codex/hooks/load-project-rules.sh
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+    if [ -f ".codex/hooks/load-project-rules.sh" ]; then
+      warn ".codex/hooks/load-project-rules.sh already exists, skipping"
+    else
+      cp "$TEMPLATES_DIR/dot-codex/hooks/load-project-rules.sh" ".codex/hooks/load-project-rules.sh"
+      chmod +x ".codex/hooks/load-project-rules.sh"
+      ok "Created .codex/hooks/load-project-rules.sh"
+    fi
+  fi
+
+  # .codex/hooks/stop-reminder.py
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+    if [ -f ".codex/hooks/stop-reminder.py" ]; then
+      warn ".codex/hooks/stop-reminder.py already exists, skipping"
+    else
+      cp "$TEMPLATES_DIR/dot-codex/hooks/stop-reminder.py" ".codex/hooks/stop-reminder.py"
+      chmod +x ".codex/hooks/stop-reminder.py"
+      ok "Created .codex/hooks/stop-reminder.py"
+    fi
   fi
 
   # .claude/rules/
@@ -450,14 +531,27 @@ with open('$REGISTRY_JSON', 'w') as f:
   echo -e "${GREEN}========================================${NC}"
   echo ""
   echo "Created:"
-  echo "  CLAUDE.md"
-  echo "  .claude/settings.json"
-  echo "  .claude/hooks/load-project-rules.sh"
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+    echo "  CLAUDE.md"
+    echo "  .claude/settings.json"
+    echo "  .claude/hooks/load-project-rules.sh"
+  fi
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+    echo "  AGENTS.md"
+    echo "  .codex/hooks.json"
+    echo "  .codex/hooks/{load-project-rules.sh,stop-reminder.py}"
+  fi
   echo "  .claude/rules/{memory-echo,logs-writing,information-lookup}.md"
   echo "  $doc_dir/{00_AGENT_RULES,01_PROJECT_OVERVIEW}.md"
   echo "  $doc_dir/logs/"
   echo ""
-  echo "Next: Open this project with Claude Code to start using RadioHeader."
+  if [ "$runtime" = "both" ]; then
+    echo "Next: Open this project with Claude Code or Codex to start using RadioHeader."
+  elif [ "$runtime" = "claude" ]; then
+    echo "Next: Open this project with Claude Code to start using RadioHeader."
+  else
+    echo "Next: Open this project with Codex to start using RadioHeader."
+  fi
   echo ""
 }
 
@@ -885,7 +979,18 @@ cmd_status() {
 
   # --- Registered projects ---
   local project_count=0
-  if [ -f "$REGISTRY" ]; then
+  if [ -f "$REGISTRY_JSON" ]; then
+    project_count=$(python3 - "$REGISTRY_JSON" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+print(len(data.get("projects", [])))
+PY
+)
+  elif [ -f "$REGISTRY" ]; then
     project_count=$(grep -c '^|' "$REGISTRY" 2>/dev/null || echo "0")
     # Subtract header rows (2: header + separator)
     project_count=$((project_count > 2 ? project_count - 2 : 0))
@@ -910,41 +1015,106 @@ cmd_status() {
     echo -e "  Status:     ${DIM}OFF${NC} (enable with 'radioheader community on')"
   fi
 
-  # --- Hooks check ---
+  # --- Runtime check ---
   echo ""
-  echo -e "${BOLD}Hooks${NC}"
+  echo -e "${BOLD}Runtimes${NC}"
 
-  local hooks=(
+  local shared_hooks=(
     "check-project-architecture.sh"
     "radioheader-loader.sh"
+    "radioheader-error-capture.sh"
+  )
+  local claude_hooks=(
     "radioheader-memory-sync.sh"
     "radioheader-stop-echo.sh"
   )
+  local codex_hooks=(
+    "radioheader-codex-userprompt.py"
+    "radioheader-stop-codex.py"
+  )
+  local claude_runtime_enabled=false
+  local codex_runtime_enabled=false
 
-  local hooks_ok=0
-  for hook in "${hooks[@]}"; do
+  if [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+    claude_runtime_enabled=true
+  elif [ -f "$CLAUDE_DIR/settings.json" ] && grep -q "radioheader-loader.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+    claude_runtime_enabled=true
+  fi
+
+  if [ -f "$CODEX_AGENTS" ] && grep -q "RadioHeader START" "$CODEX_AGENTS" 2>/dev/null; then
+    codex_runtime_enabled=true
+  elif [ -f "$CODEX_HOOKS_JSON" ] && grep -q "radioheader-stop-codex.py" "$CODEX_HOOKS_JSON" 2>/dev/null; then
+    codex_runtime_enabled=true
+  fi
+
+  for hook in "${shared_hooks[@]}"; do
     if [ -x "$CLAUDE_DIR/hooks/$hook" ]; then
-      echo -e "  ${GREEN}✓${NC} $hook"
-      hooks_ok=$((hooks_ok + 1))
+      echo -e "  ${GREEN}✓${NC} shared hook: $hook"
     else
-      echo -e "  ${RED}✗${NC} $hook"
+      echo -e "  ${RED}✗${NC} shared hook: $hook"
     fi
   done
+
+  if [ "$claude_runtime_enabled" = true ]; then
+    for hook in "${claude_hooks[@]}"; do
+      if [ -x "$CLAUDE_DIR/hooks/$hook" ]; then
+        echo -e "  ${GREEN}✓${NC} Claude hook: $hook"
+      else
+        echo -e "  ${RED}✗${NC} Claude hook: $hook"
+      fi
+    done
+  else
+    echo -e "  ${DIM}-${NC} Claude runtime not enabled"
+  fi
+
+  if [ "$codex_runtime_enabled" = true ]; then
+    for hook in "${codex_hooks[@]}"; do
+      if [ -x "$CLAUDE_DIR/hooks/$hook" ]; then
+        echo -e "  ${GREEN}✓${NC} Codex hook: $hook"
+      else
+        echo -e "  ${RED}✗${NC} Codex hook: $hook"
+      fi
+    done
+  else
+    echo -e "  ${DIM}-${NC} Codex runtime not enabled"
+  fi
 
   # --- CLAUDE.md check ---
   echo ""
   echo -e "${BOLD}Configuration${NC}"
 
-  if [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+  if [ "$claude_runtime_enabled" = true ] && [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} Claude runtime enabled"
     echo -e "  ${GREEN}✓${NC} CLAUDE.md has RadioHeader rules"
+  elif [ "$claude_runtime_enabled" = true ]; then
+    echo -e "  ${YELLOW}!${NC} Claude runtime enabled but CLAUDE.md missing RadioHeader rules"
   else
-    echo -e "  ${RED}✗${NC} CLAUDE.md missing RadioHeader rules"
+    echo -e "  ${DIM}-${NC} Claude runtime not enabled"
   fi
 
-  if [ -f "$CLAUDE_DIR/settings.json" ]; then
+  if [ "$claude_runtime_enabled" = true ] && [ -f "$CLAUDE_DIR/settings.json" ]; then
     echo -e "  ${GREEN}✓${NC} settings.json exists"
+  elif [ "$claude_runtime_enabled" = true ]; then
+    echo -e "  ${YELLOW}!${NC} settings.json missing"
   else
-    echo -e "  ${RED}✗${NC} settings.json missing"
+    :
+  fi
+
+  if [ "$codex_runtime_enabled" = true ] && [ -f "$CODEX_AGENTS" ] && grep -q "RadioHeader START" "$CODEX_AGENTS" 2>/dev/null; then
+    echo -e "  ${GREEN}✓${NC} Codex runtime enabled"
+    echo -e "  ${GREEN}✓${NC} ~/.codex/AGENTS.md has RadioHeader rules"
+  elif [ "$codex_runtime_enabled" = true ]; then
+    echo -e "  ${YELLOW}!${NC} Codex runtime enabled but ~/.codex/AGENTS.md missing RadioHeader rules"
+  else
+    echo -e "  ${DIM}-${NC} Codex runtime not enabled"
+  fi
+
+  if [ "$codex_runtime_enabled" = true ] && [ -f "$CODEX_HOOKS_JSON" ]; then
+    echo -e "  ${GREEN}✓${NC} ~/.codex/hooks.json exists"
+  elif [ "$codex_runtime_enabled" = true ]; then
+    echo -e "  ${YELLOW}!${NC} ~/.codex/hooks.json missing"
+  else
+    :
   fi
 
   if [ -d "$TEMPLATES_DIR" ]; then
@@ -953,6 +1123,7 @@ cmd_status() {
     echo -e "  ${YELLOW}~${NC} Project templates not installed (CLI init won't work)"
   fi
 
+  echo -e "  Project runtime: $(project_runtime_summary)"
   echo ""
 }
 
@@ -966,6 +1137,21 @@ cmd_doctor() {
   echo ""
 
   local issues=0
+  local claude_runtime_enabled=false
+  local codex_runtime_enabled=false
+  local shared_hooks=(
+    "check-project-architecture.sh"
+    "radioheader-loader.sh"
+    "radioheader-error-capture.sh"
+  )
+  local claude_hooks=(
+    "radioheader-memory-sync.sh"
+    "radioheader-stop-echo.sh"
+  )
+  local codex_hooks=(
+    "radioheader-codex-userprompt.py"
+    "radioheader-stop-codex.py"
+  )
 
   # --- Global installation ---
   echo -e "${BOLD}Global Installation${NC}"
@@ -977,43 +1163,83 @@ cmd_doctor() {
   fi
   echo -e "  ${GREEN}✓${NC} RadioHeader directory exists"
 
-  # Hooks
-  local hooks=(
-    "check-project-architecture.sh"
-    "radioheader-loader.sh"
-    "radioheader-memory-sync.sh"
-    "radioheader-stop-echo.sh"
-  )
+  if [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
+    claude_runtime_enabled=true
+  elif [ -f "$CLAUDE_DIR/settings.json" ] && grep -q "radioheader-loader.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+    claude_runtime_enabled=true
+  fi
 
-  for hook in "${hooks[@]}"; do
+  if [ -f "$CODEX_AGENTS" ] && grep -q "RadioHeader START" "$CODEX_AGENTS" 2>/dev/null; then
+    codex_runtime_enabled=true
+  elif [ -f "$CODEX_HOOKS_JSON" ] && grep -q "radioheader-stop-codex.py" "$CODEX_HOOKS_JSON" 2>/dev/null; then
+    codex_runtime_enabled=true
+  fi
+
+  # Shared hooks
+  for hook in "${shared_hooks[@]}"; do
     if [ ! -f "$CLAUDE_DIR/hooks/$hook" ]; then
-      echo -e "  ${RED}✗${NC} Hook missing: $hook"
+      echo -e "  ${RED}✗${NC} Shared hook missing: $hook"
       issues=$((issues + 1))
     elif [ ! -x "$CLAUDE_DIR/hooks/$hook" ]; then
-      echo -e "  ${YELLOW}!${NC} Hook not executable: $hook"
+      echo -e "  ${YELLOW}!${NC} Shared hook not executable: $hook"
       issues=$((issues + 1))
     else
-      echo -e "  ${GREEN}✓${NC} $hook"
+      echo -e "  ${GREEN}✓${NC} Shared hook: $hook"
     fi
   done
 
+  if [ "$claude_runtime_enabled" = true ]; then
+    for hook in "${claude_hooks[@]}"; do
+      if [ ! -f "$CLAUDE_DIR/hooks/$hook" ]; then
+        echo -e "  ${RED}✗${NC} Claude hook missing: $hook"
+        issues=$((issues + 1))
+      elif [ ! -x "$CLAUDE_DIR/hooks/$hook" ]; then
+        echo -e "  ${YELLOW}!${NC} Claude hook not executable: $hook"
+        issues=$((issues + 1))
+      else
+        echo -e "  ${GREEN}✓${NC} Claude hook: $hook"
+      fi
+    done
+  else
+    echo -e "  ${DIM}-${NC} Claude runtime not enabled"
+  fi
+
+  if [ "$codex_runtime_enabled" = true ]; then
+    for hook in "${codex_hooks[@]}"; do
+      if [ ! -f "$CLAUDE_DIR/hooks/$hook" ]; then
+        echo -e "  ${RED}✗${NC} Codex hook missing: $hook"
+        issues=$((issues + 1))
+      elif [ ! -x "$CLAUDE_DIR/hooks/$hook" ]; then
+        echo -e "  ${YELLOW}!${NC} Codex hook not executable: $hook"
+        issues=$((issues + 1))
+      else
+        echo -e "  ${GREEN}✓${NC} Codex hook: $hook"
+      fi
+    done
+  else
+    echo -e "  ${DIM}-${NC} Codex runtime not enabled"
+  fi
+
   # CLAUDE.md
-  if [ -f "$CLAUDE_DIR/CLAUDE.md" ]; then
+  if [ "$claude_runtime_enabled" = true ] && [ -f "$CLAUDE_DIR/CLAUDE.md" ]; then
     if grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
       echo -e "  ${GREEN}✓${NC} CLAUDE.md has RadioHeader markers"
     else
       echo -e "  ${RED}✗${NC} CLAUDE.md missing RadioHeader rules section"
       issues=$((issues + 1))
     fi
-  else
+  elif [ "$claude_runtime_enabled" = true ]; then
     echo -e "  ${RED}✗${NC} CLAUDE.md not found"
     issues=$((issues + 1))
+  else
+    echo -e "  ${DIM}-${NC} Claude runtime not enabled"
   fi
 
   # settings.json
-  if [ -f "$CLAUDE_DIR/settings.json" ]; then
+  if [ "$claude_runtime_enabled" = true ] && [ -f "$CLAUDE_DIR/settings.json" ]; then
     local missing_hooks=0
-    for hook in "${hooks[@]}"; do
+    local expected_claude_refs=("${shared_hooks[@]}" "${claude_hooks[@]}")
+    for hook in "${expected_claude_refs[@]}"; do
       if ! grep -q "$hook" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
         echo -e "  ${YELLOW}!${NC} settings.json missing reference to $hook"
         missing_hooks=$((missing_hooks + 1))
@@ -1023,9 +1249,51 @@ cmd_doctor() {
     if [ "$missing_hooks" -eq 0 ]; then
       echo -e "  ${GREEN}✓${NC} settings.json has all hook references"
     fi
-  else
+  elif [ "$claude_runtime_enabled" = true ]; then
     echo -e "  ${RED}✗${NC} settings.json not found"
     issues=$((issues + 1))
+  else
+    :
+  fi
+
+  if [ "$codex_runtime_enabled" = true ] && [ -f "$CODEX_AGENTS" ]; then
+    if grep -q "RadioHeader START" "$CODEX_AGENTS" 2>/dev/null; then
+      echo -e "  ${GREEN}✓${NC} ~/.codex/AGENTS.md has RadioHeader markers"
+    else
+      echo -e "  ${YELLOW}!${NC} ~/.codex/AGENTS.md missing RadioHeader rules section"
+      issues=$((issues + 1))
+    fi
+  elif [ "$codex_runtime_enabled" = true ]; then
+    echo -e "  ${YELLOW}!${NC} ~/.codex/AGENTS.md not found"
+    issues=$((issues + 1))
+  else
+    echo -e "  ${DIM}-${NC} Codex runtime not enabled"
+  fi
+
+  if [ "$codex_runtime_enabled" = true ] && [ -f "$CODEX_HOOKS_JSON" ]; then
+    local codex_targets=(
+      "check-project-architecture.sh"
+      "radioheader-loader.sh"
+      "radioheader-error-capture.sh"
+      "radioheader-codex-userprompt.py"
+      "radioheader-stop-codex.py"
+    )
+    local missing_codex_hooks=0
+    for hook in "${codex_targets[@]}"; do
+      if ! grep -q "$hook" "$CODEX_HOOKS_JSON" 2>/dev/null; then
+        echo -e "  ${YELLOW}!${NC} ~/.codex/hooks.json missing reference to $hook"
+        missing_codex_hooks=$((missing_codex_hooks + 1))
+        issues=$((issues + 1))
+      fi
+    done
+    if [ "$missing_codex_hooks" -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} ~/.codex/hooks.json has all RadioHeader references"
+    fi
+  elif [ "$codex_runtime_enabled" = true ]; then
+    echo -e "  ${YELLOW}!${NC} ~/.codex/hooks.json not found"
+    issues=$((issues + 1))
+  else
+    :
   fi
 
   # Templates
@@ -1091,9 +1359,9 @@ cmd_doctor() {
         local bname
         bname=$(basename "$f")
         local has_id has_domain has_tags
-        has_id=$(grep -c '^id:' "$f" 2>/dev/null || echo "0")
-        has_domain=$(grep -c '^domain:' "$f" 2>/dev/null || echo "0")
-        has_tags=$(grep -c '^tags:' "$f" 2>/dev/null || echo "0")
+        has_id=$(grep '^id:' "$f" 2>/dev/null | wc -l | tr -d ' ')
+        has_domain=$(grep '^domain:' "$f" 2>/dev/null | wc -l | tr -d ' ')
+        has_tags=$(grep '^tags:' "$f" 2>/dev/null | wc -l | tr -d ' ')
         if [ "$has_id" -eq 0 ] || [ "$has_domain" -eq 0 ] || [ "$has_tags" -eq 0 ]; then
           echo -e "  ${YELLOW}!${NC} Missing metadata in $bname (need: id, domain, tags)"
           missing_meta=$((missing_meta + 1))
@@ -1152,7 +1420,39 @@ cmd_doctor() {
   echo ""
   echo -e "${BOLD}Project Registry${NC}"
 
-  if [ -f "$REGISTRY" ]; then
+  if [ -f "$REGISTRY_JSON" ]; then
+    local stale=0
+    while IFS=$'\t' read -r path status; do
+      [ -z "$path" ] && continue
+      if [[ "$status" == "archived" ]] || [[ "$status" == "archive" ]]; then
+        continue
+      fi
+      if [ ! -d "$path" ]; then
+        echo -e "  ${YELLOW}!${NC} Stale project path: $path"
+        stale=$((stale + 1))
+        issues=$((issues + 1))
+      fi
+    done < <(
+      python3 - "$REGISTRY_JSON" <<'PY'
+import json
+import os
+import sys
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+for project in data.get("projects", []):
+    path = os.path.expanduser((project.get("path") or "").strip())
+    status = (project.get("status") or "active").strip().lower()
+    if path:
+        print(f"{path}\t{status}")
+PY
+    )
+
+    if [ "$stale" -eq 0 ]; then
+      echo -e "  ${GREEN}✓${NC} All registered project paths are valid"
+    fi
+  elif [ -f "$REGISTRY" ]; then
     local stale=0
     while IFS='|' read -r _ _ _ path _ status _; do
       path=$(echo "$path" | xargs) # trim whitespace
@@ -1179,7 +1479,7 @@ cmd_doctor() {
       echo -e "  ${GREEN}✓${NC} All registered project paths are valid"
     fi
   else
-    echo -e "  ${YELLOW}!${NC} project-registry.md not found"
+    echo -e "  ${YELLOW}!${NC} project-registry.json / project-registry.md not found"
     issues=$((issues + 1))
   fi
 
@@ -1220,7 +1520,7 @@ cmd_doctor() {
   if [ "$issues" -eq 0 ]; then
     echo -e "${GREEN}No issues found. RadioHeader is healthy!${NC}"
   else
-    echo -e "${YELLOW}Found $issues issue(s). Run install.sh to fix missing components.${NC}"
+    echo -e "${YELLOW}Found $issues issue(s). Review the warnings above; some are install/runtime gaps, others are data quality issues.${NC}"
   fi
   echo ""
 }
@@ -2671,9 +2971,10 @@ ${BOLD}OPTIONS${NC}
 
 ${BOLD}WHAT IT DOES${NC}
   1. Renames outdated files (e.g. memory-reflux.md → memory-echo.md)
-  2. Adds missing rule files from current templates
-  3. Updates file contents with latest template (preserves __HOME__ etc.)
-  4. Reports changes per project
+  2. Syncs runtime templates from the current RadioHeader repo
+  3. Adds missing rule and runtime files from current templates
+  4. Updates managed template contents (preserves __HOME__ etc.)
+  5. Reports changes per project
 
 ${BOLD}EXAMPLES${NC}
   radioheader upgrade                  # Upgrade all projects
@@ -2693,8 +2994,8 @@ UPGRADEHELP
     esac
   done
 
-  if [ ! -f "$REGISTRY" ]; then
-    err "project-registry.md not found. No projects to upgrade."
+  if [ ! -f "$REGISTRY_JSON" ] && [ ! -f "$REGISTRY" ]; then
+    err "No project registry found. Expected project-registry.json or project-registry.md."
     return 1
   fi
 
@@ -2714,10 +3015,34 @@ UPGRADEHELP
   local script_path
   script_path=$(cd "$(dirname "$0")" && pwd)
   local repo_templates="$script_path/templates/project"
-  if [ -d "$repo_templates/dot-claude/rules" ]; then
+  if [ -d "$repo_templates" ]; then
     local synced=0
-    # Sync rule templates
+
+    local repo_file
+    for repo_file in \
+      "$repo_templates/CLAUDE.md.template" \
+      "$repo_templates/AGENTS.md.template" \
+      "$repo_templates/dot-claude/settings.json" \
+      "$repo_templates/dot-codex/hooks.json" \
+      "$repo_templates/dot-claude/hooks/load-project-rules.sh" \
+      "$repo_templates/dot-codex/hooks/load-project-rules.sh"
+    do
+      [ -f "$repo_file" ] || continue
+      local rel
+      rel="${repo_file#$repo_templates/}"
+      if [ ! -f "$TEMPLATES_DIR/$rel" ] || ! diff -q "$repo_file" "$TEMPLATES_DIR/$rel" >/dev/null 2>&1; then
+        if [ "$dry_run" = true ]; then
+          echo -e "  ${YELLOW}↻${NC} Would sync template: $rel"
+        else
+          mkdir -p "$(dirname "$TEMPLATES_DIR/$rel")"
+          cp "$repo_file" "$TEMPLATES_DIR/$rel"
+        fi
+        synced=$((synced + 1))
+      fi
+    done
+
     for tmpl in "$repo_templates/dot-claude/rules"/*.md; do
+      [ -f "$tmpl" ] || continue
       local fname
       fname=$(basename "$tmpl")
       if [ ! -f "$TEMPLATES_DIR/dot-claude/rules/$fname" ] || ! diff -q "$tmpl" "$TEMPLATES_DIR/dot-claude/rules/$fname" >/dev/null 2>&1; then
@@ -2745,6 +3070,22 @@ UPGRADEHELP
         fi
       done
     fi
+    if [ -d "$repo_templates/dot-codex/hooks" ]; then
+      for tmpl in "$repo_templates/dot-codex/hooks"/*; do
+        [ -f "$tmpl" ] || continue
+        local fname
+        fname=$(basename "$tmpl")
+        if [ ! -f "$TEMPLATES_DIR/dot-codex/hooks/$fname" ] || ! diff -q "$tmpl" "$TEMPLATES_DIR/dot-codex/hooks/$fname" >/dev/null 2>&1; then
+          if [ "$dry_run" = true ]; then
+            echo -e "  ${YELLOW}↻${NC} Would sync template: dot-codex/hooks/$fname"
+          else
+            mkdir -p "$TEMPLATES_DIR/dot-codex/hooks"
+            cp "$tmpl" "$TEMPLATES_DIR/dot-codex/hooks/$fname"
+          fi
+          synced=$((synced + 1))
+        fi
+      done
+    fi
     if [ "$synced" -gt 0 ]; then
       if [ "$dry_run" = false ]; then
         ok "Synced $synced template(s) from repo"
@@ -2758,17 +3099,55 @@ UPGRADEHELP
   local total_projects=0
   local upgraded_projects=0
   local total_changes=0
+  local total_drift=0
+  local project_entries=""
+  local registry_entries_tmp
+  registry_entries_tmp=$(mktemp)
+
+  if [ -f "$REGISTRY_JSON" ]; then
+    python3 - "$REGISTRY_JSON" > "$registry_entries_tmp" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+for project in data.get("projects", []):
+    name = (project.get("name") or "").strip()
+    path = (project.get("path") or "").strip()
+    tech = (project.get("tech_stack") or "").strip()
+    if name and path:
+        print(f"{name}\t{path}\t{tech}")
+PY
+  elif [ -f "$REGISTRY" ]; then
+    python3 - "$REGISTRY" > "$registry_entries_tmp" <<'PY'
+from pathlib import Path
+import sys
+
+home = str(Path.home())
+
+for raw in open(sys.argv[1]):
+    if not raw.startswith("|"):
+        continue
+    parts = [part.strip().strip("`") for part in raw.split("|")[1:-1]]
+    if len(parts) < 3:
+        continue
+    name, tech, path = parts[0], parts[1], parts[2]
+    if not name or name.startswith("*(") or "project" in name.lower() or set(name) == {"-"}:
+        continue
+    if path.startswith("~/"):
+        path = home + path[1:]
+    if path:
+        print(f"{name}\t{path}\t{tech}")
+PY
+  fi
+  project_entries=$(cat "$registry_entries_tmp")
+  rm -f "$registry_entries_tmp"
 
   # Read registry and process each project
-  while IFS='|' read -r _ pname _ ppath _ _ _; do
-    # Skip header/separator lines
-    pname=$(echo "$pname" | xargs 2>/dev/null) || continue
-    ppath=$(echo "$ppath" | xargs 2>/dev/null | sed 's/`//g' | sed "s|^~/|$HOME/|") || continue
-
+  while IFS=$'\t' read -r pname ppath ptech; do
     [ -z "$pname" ] && continue
     [ -z "$ppath" ] && continue
-    echo "$pname" | grep -q "^-" && continue
-    echo "$pname" | grep -qi "项目名\|project" && continue
 
     # Filter by target
     if [ "$target" != "all" ] && [ "$pname" != "$target" ]; then
@@ -2788,8 +3167,38 @@ UPGRADEHELP
       continue
     fi
 
+    local has_claude=false
+    local has_codex=false
+    if [ -f "$ppath/CLAUDE.md" ] || [ -f "$ppath/.claude/settings.json" ]; then
+      has_claude=true
+    fi
+    if [ -f "$ppath/AGENTS.md" ] || [ -f "$ppath/.codex/hooks.json" ]; then
+      has_codex=true
+    fi
+    local metadata_source=""
+    local project_tech_stack="${ptech:-Unknown}"
+    local project_terminology="None"
+    local project_doc_dir="projectBasicInfo"
+    if [ -f "$ppath/CLAUDE.md" ]; then
+      metadata_source="$ppath/CLAUDE.md"
+    elif [ -f "$ppath/AGENTS.md" ]; then
+      metadata_source="$ppath/AGENTS.md"
+    fi
+    if [ -n "$metadata_source" ]; then
+      local parsed_stack
+      parsed_stack=$(sed -n 's/^- Tech stack: //p' "$metadata_source" | head -n 1)
+      [ -n "$parsed_stack" ] && project_tech_stack="$parsed_stack"
+      local parsed_terms
+      parsed_terms=$(sed -n 's/^- Terminology: //p' "$metadata_source" | head -n 1)
+      [ -n "$parsed_terms" ] && project_terminology="$parsed_terms"
+      local parsed_doc_dir
+      parsed_doc_dir=$(sed -n 's|.*`\([^`]*\)/00_AGENT_RULES.md`.*|\1|p' "$metadata_source" | head -n 1)
+      [ -n "$parsed_doc_dir" ] && project_doc_dir="$parsed_doc_dir"
+    fi
+
     total_projects=$((total_projects + 1))
     local project_changes=0
+    local project_drift=0
 
     echo -e "  ${BOLD}$pname${NC} ($ppath)"
 
@@ -2821,6 +3230,7 @@ UPGRADEHELP
           else
             cp "$tmpl_file" "$rules_dir/$fname"
             sedi "s|__HOME__|$HOME|g" "$rules_dir/$fname"
+            sedi "s|__DOC_DIR__|$project_doc_dir|g" "$rules_dir/$fname"
             echo -e "    ${GREEN}+${NC} Added missing: $fname"
           fi
           project_changes=$((project_changes + 1))
@@ -2828,57 +3238,160 @@ UPGRADEHELP
       done
     fi
 
-    # --- Step 3: Update rule file contents (only if template is newer) ---
+    # --- Step 3: Report rule file drift (never overwrite customizations) ---
+    # Rules files are per-project behavioral rules. Users may customize them
+    # with project-specific guidance. We never silently overwrite; instead we
+    # warn when drift is detected so the user can resolve it intentionally
+    # (e.g. delete the file and re-run upgrade to accept the new template,
+    # or manually merge in the changes they want).
     for rule_file in "$rules_dir"/*.md; do
       local fname
       fname=$(basename "$rule_file")
       local tmpl="$template_rules_dir/$fname"
       if [ -f "$tmpl" ]; then
-        # Generate what the current template would look like with HOME expanded
         local expected
-        expected=$(sed "s|__HOME__|$HOME|g" "$tmpl")
+        expected=$(sed -e "s|__HOME__|$HOME|g" -e "s|__DOC_DIR__|$project_doc_dir|g" "$tmpl")
         local actual
         actual=$(cat "$rule_file")
         if [ "$expected" != "$actual" ]; then
-          if [ "$dry_run" = true ]; then
-            echo -e "    ${YELLOW}↻${NC} Would update content: $fname"
-          else
-            cp "$tmpl" "$rule_file"
-            sedi "s|__HOME__|$HOME|g" "$rule_file"
-            echo -e "    ${GREEN}↻${NC} Updated content: $fname"
-          fi
-          project_changes=$((project_changes + 1))
+          echo -e "    ${YELLOW}!${NC} Drift in $fname (customized or stale) — left unchanged"
+          echo -e "      ${DIM}To accept the new template: rm .claude/rules/$fname && radioheader upgrade${NC}"
+          project_drift=$((project_drift + 1))
         fi
       fi
     done
 
-    # --- Step 4: Check .claude/hooks ---
+    # --- Step 4: Sync .claude/hooks ---
     local hooks_dir="$ppath/.claude/hooks"
-    if [ -d "$hooks_dir" ] && [ -d "$TEMPLATES_DIR/dot-claude/hooks" ]; then
+    if [ "$has_claude" = true ] && [ -d "$TEMPLATES_DIR/dot-claude/hooks" ]; then
       for tmpl_hook in "$TEMPLATES_DIR/dot-claude/hooks"/*.sh; do
+        [ -f "$tmpl_hook" ] || continue
         local hname
         hname=$(basename "$tmpl_hook")
         if [ ! -f "$hooks_dir/$hname" ]; then
           if [ "$dry_run" = true ]; then
             echo -e "    ${YELLOW}+${NC} Would add missing hook: $hname"
           else
+            mkdir -p "$hooks_dir"
             cp "$tmpl_hook" "$hooks_dir/$hname"
             chmod +x "$hooks_dir/$hname"
             echo -e "    ${GREEN}+${NC} Added missing hook: $hname"
+          fi
+          project_changes=$((project_changes + 1))
+        elif ! diff -q "$tmpl_hook" "$hooks_dir/$hname" >/dev/null 2>&1; then
+          if [ "$dry_run" = true ]; then
+            echo -e "    ${YELLOW}↻${NC} Would update hook: $hname"
+          else
+            cp "$tmpl_hook" "$hooks_dir/$hname"
+            chmod +x "$hooks_dir/$hname"
+            echo -e "    ${GREEN}↻${NC} Updated hook: $hname"
           fi
           project_changes=$((project_changes + 1))
         fi
       done
     fi
 
-    if [ "$project_changes" -eq 0 ]; then
+    # --- Step 5: Add missing runtime entry files (never overwrite existing) ---
+    # CLAUDE.md / AGENTS.md / settings.json / hooks.json may contain user
+    # customizations (extra index entries, custom hook commands, local notes).
+    # Upgrade only fills in files that are missing; it never rewrites an
+    # existing file, even if the content differs from the current template.
+    if [ "$has_claude" = true ] && [ -f "$TEMPLATES_DIR/CLAUDE.md.template" ]; then
+      if [ ! -f "$ppath/CLAUDE.md" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}+${NC} Would add missing: CLAUDE.md"
+        else
+          cp "$TEMPLATES_DIR/CLAUDE.md.template" "$ppath/CLAUDE.md"
+          sedi "s|__PROJECT_NAME__|$pname|g" "$ppath/CLAUDE.md"
+          sedi "s|__TECH_STACK__|$project_tech_stack|g" "$ppath/CLAUDE.md"
+          sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/CLAUDE.md"
+          sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/CLAUDE.md"
+          echo -e "    ${GREEN}+${NC} Added missing: CLAUDE.md"
+        fi
+        project_changes=$((project_changes + 1))
+      fi
+
+      if [ -f "$TEMPLATES_DIR/dot-claude/settings.json" ] && [ ! -f "$ppath/.claude/settings.json" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}+${NC} Would add missing: .claude/settings.json"
+        else
+          mkdir -p "$ppath/.claude"
+          cp "$TEMPLATES_DIR/dot-claude/settings.json" "$ppath/.claude/settings.json"
+          echo -e "    ${GREEN}+${NC} Added missing: .claude/settings.json"
+        fi
+        project_changes=$((project_changes + 1))
+      fi
+    fi
+
+    if [ "$has_codex" = true ] && [ -f "$TEMPLATES_DIR/AGENTS.md.template" ]; then
+      if [ ! -f "$ppath/AGENTS.md" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}+${NC} Would add missing: AGENTS.md"
+        else
+          cp "$TEMPLATES_DIR/AGENTS.md.template" "$ppath/AGENTS.md"
+          sedi "s|__PROJECT_NAME__|$pname|g" "$ppath/AGENTS.md"
+          sedi "s|__TECH_STACK__|$project_tech_stack|g" "$ppath/AGENTS.md"
+          sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/AGENTS.md"
+          sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/AGENTS.md"
+          echo -e "    ${GREEN}+${NC} Added missing: AGENTS.md"
+        fi
+        project_changes=$((project_changes + 1))
+      fi
+
+      if [ -f "$TEMPLATES_DIR/dot-codex/hooks.json" ] && [ ! -f "$ppath/.codex/hooks.json" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}+${NC} Would add missing: .codex/hooks.json"
+        else
+          mkdir -p "$ppath/.codex"
+          cp "$TEMPLATES_DIR/dot-codex/hooks.json" "$ppath/.codex/hooks.json"
+          echo -e "    ${GREEN}+${NC} Added missing: .codex/hooks.json"
+        fi
+        project_changes=$((project_changes + 1))
+      fi
+
+      local codex_hooks_dir="$ppath/.codex/hooks"
+      if [ -d "$TEMPLATES_DIR/dot-codex/hooks" ]; then
+        for tmpl_hook in "$TEMPLATES_DIR/dot-codex/hooks"/*; do
+          [ -f "$tmpl_hook" ] || continue
+          local hname
+          hname=$(basename "$tmpl_hook")
+          if [ ! -f "$codex_hooks_dir/$hname" ]; then
+            if [ "$dry_run" = true ]; then
+              echo -e "    ${YELLOW}+${NC} Would add missing hook: .codex/hooks/$hname"
+            else
+              mkdir -p "$codex_hooks_dir"
+              cp "$tmpl_hook" "$codex_hooks_dir/$hname"
+              chmod +x "$codex_hooks_dir/$hname"
+              echo -e "    ${GREEN}+${NC} Added missing hook: .codex/hooks/$hname"
+            fi
+            project_changes=$((project_changes + 1))
+          elif ! diff -q "$tmpl_hook" "$codex_hooks_dir/$hname" >/dev/null 2>&1; then
+            if [ "$dry_run" = true ]; then
+              echo -e "    ${YELLOW}↻${NC} Would update hook: .codex/hooks/$hname"
+            else
+              mkdir -p "$codex_hooks_dir"
+              cp "$tmpl_hook" "$codex_hooks_dir/$hname"
+              chmod +x "$codex_hooks_dir/$hname"
+              echo -e "    ${GREEN}↻${NC} Updated hook: .codex/hooks/$hname"
+            fi
+            project_changes=$((project_changes + 1))
+          fi
+        done
+      fi
+    fi
+
+    if [ "$project_changes" -eq 0 ] && [ "$project_drift" -eq 0 ]; then
       echo -e "    ${GREEN}✓${NC} Already up to date"
+    elif [ "$project_changes" -eq 0 ]; then
+      echo -e "    ${YELLOW}✓${NC} No structural changes; $project_drift customized rule file(s) left as-is"
+      total_drift=$((total_drift + project_drift))
     else
       upgraded_projects=$((upgraded_projects + 1))
       total_changes=$((total_changes + project_changes))
+      total_drift=$((total_drift + project_drift))
     fi
 
-  done < "$REGISTRY"
+  done <<< "$project_entries"
 
   # --- Summary ---
   echo ""
@@ -2890,11 +3403,22 @@ UPGRADEHELP
     fi
   elif [ "$dry_run" = true ]; then
     echo -e "${BOLD}Dry run complete:${NC} $total_changes change(s) across $upgraded_projects of $total_projects project(s)"
+    if [ "$total_drift" -gt 0 ]; then
+      echo -e "${YELLOW}$total_drift customized rule file(s) detected — left unchanged.${NC}"
+    fi
     echo -e "${DIM}Run without --dry-run to apply.${NC}"
   elif [ "$total_changes" -eq 0 ]; then
-    echo -e "${GREEN}All $total_projects project(s) are up to date.${NC}"
+    if [ "$total_drift" -gt 0 ]; then
+      echo -e "${GREEN}All $total_projects project(s) are structurally up to date.${NC}"
+      echo -e "${YELLOW}$total_drift customized rule file(s) detected — review warnings above.${NC}"
+    else
+      echo -e "${GREEN}All $total_projects project(s) are up to date.${NC}"
+    fi
   else
     echo -e "${GREEN}Upgraded $upgraded_projects project(s) with $total_changes change(s).${NC}"
+    if [ "$total_drift" -gt 0 ]; then
+      echo -e "${YELLOW}$total_drift customized rule file(s) left as-is — review warnings above.${NC}"
+    fi
   fi
   echo ""
 }

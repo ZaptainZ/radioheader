@@ -1,10 +1,14 @@
 # RadioHeader
 
-**Cross-project memory for Claude Code.** Stop re-solving bugs you already fixed in another project.
+**Cross-project memory for Claude Code and Codex.** Stop re-solving bugs you already fixed in another project.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Runtime: Claude Code](https://img.shields.io/badge/Claude%20Code-supported-6b4bff)](https://claude.com/claude-code)
+[![Runtime: Codex CLI](https://img.shields.io/badge/Codex%20CLI-supported-10a37f)](https://developers.openai.com/codex/cli)
 
 [中文文档](README_zh.md)
+
+> **v2.0 — Codex CLI support.** RadioHeader now works on both Claude Code **and** OpenAI Codex CLI from a single install. The same `topics/`, `shortwave/`, and project memory are shared between the two runtimes; an experience captured on one agent is immediately searchable from the other. See [Runtime Support](#runtime-support) below.
 
 ## The Problem
 
@@ -48,11 +52,11 @@ From the second time onward, the same class of problem goes from minutes to seco
 
 **Three-Layer Memory** — RadioHeader (global, shared by all projects) → Project memory (project-specific) → Session context (ephemeral). Experience flows up from projects to the global hub, then back down to wherever it's needed.
 
-**Echo (Experience Flows Back)** — After each task, experience automatically flows back into the memory system. Four hooks drive the cycle: SessionStart shows status, PostToolUse detects memory writes and triggers Echo, Stop reminds Claude to check for new experience. No manual intervention needed.
+**Echo (Experience Flows Back)** — After each task, experience automatically flows back into the memory system. The feedback loop is runtime-native: Claude Code uses `PostToolUse Write|Edit` to trigger Echo the moment memory is written; Codex CLI uses a `UserPromptSubmit` snapshot + `Stop` diff so the same "memory → topics → shortwave" chain is enforced with a `decision: block` continuation if any step is skipped. The rules fire regardless of which agent you're driving, and both runtimes share one data layer.
 
 **Shortwave (Knowledge Distillation)** — Topic entries contain project-specific details (`[source:MyApp]`). Shortwave strips out project names, file paths, and framework details into universal, project-agnostic knowledge units — searchable across any tech stack. This also protects privacy: raw entries might contain project paths, internal naming, or API keys. Shortwave removes all of that.
 
-**Search → Apply → Trace** — Not a suggestion, a mandatory behavioral rule injected into CLAUDE.md. When Claude finds relevant experience, it **must** cite and apply it. Finding experience but ignoring it is explicitly prohibited.
+**Search → Apply → Trace** — Not a suggestion, a mandatory behavioral rule injected into `CLAUDE.md` and `AGENTS.md`. When the agent finds relevant experience, it **must** cite and apply it. Finding experience but ignoring it is explicitly prohibited.
 
 **Learn (External Knowledge)** — RadioHeader isn't limited to lessons learned the hard way. The `learn` command extracts articles from any URL — including walled gardens like WeChat Official Accounts, Medium, and Substack — and distills them into shortwave entries. This turns RadioHeader from a passive experience manager into an active **information gateway** for Claude Code: not just remembering mistakes, but actively absorbing knowledge from the outside world.
 
@@ -62,15 +66,53 @@ From the second time onward, the same class of problem goes from minutes to seco
 
 **Community Sharing** — Opt-in community shortwave library. Your local experience stays local; when you choose to publish, entries pass three gates (quality score ≥6/8, privacy scan, dedup check) before reaching the shared pool. Quality follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigmergy) model — like ant pheromone trails: good entries get reinforced through usage, bad entries decay naturally.
 
+## Runtime Support
+
+RadioHeader ships a single data layer (`~/.claude/radioheader/`) with **runtime adapters** that plug into whichever coding agent you're using — Claude Code, OpenAI Codex CLI, or both at once.
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| Entry file | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` |
+| Global hooks | `~/.claude/settings.json` | `~/.codex/hooks.json` |
+| SessionStart context | `radioheader-loader.sh` (plain stdout) | `radioheader-loader.sh` (plain stdout) |
+| Echo-back trigger | `PostToolUse Write\|Edit` (immediate) | `UserPromptSubmit` snapshot + `Stop` diff |
+| Search → Apply → Trace rules | Injected into `CLAUDE.md` | Injected into `AGENTS.md` |
+| Per-project scaffold | `.claude/rules/`, `.claude/settings.json`, `CLAUDE.md` | `.codex/hooks.json`, `.codex/hooks/`, `AGENTS.md` |
+
+The Codex adapter uses a **snapshot + diff** loop: the `UserPromptSubmit` hook takes a lightweight fingerprint of `memory/`, `topics/`, `shortwave/`, project docs, and up to 10k files of the repo before each turn; the `Stop` hook diffs against that fingerprint and decides what to do:
+
+- Memory changed but no global topic updated → `decision: block` with a continuation prompt asking the agent to echo the experience.
+- Topic changed but no shortwave entry distilled → `decision: block` asking for the shortwave follow-up.
+- Both sides updated → `{"continue": true}` with a `systemMessage` checklist (log writing, overview sync).
+
+This reproduces the Claude Code `PostToolUse`/`Stop` loop using the hook events Codex actually exposes, so the behavior is the same from the user's perspective: experience flows back automatically, and both runtimes see each other's knowledge.
+
+### Compatibility notes
+
+- Requires `codex-cli 0.118.0+` for the `Stop` hook and `UserPromptSubmit` hook support.
+- Python hooks target **Python 3.7+** (use `from __future__ import annotations`) — compatible with the `/usr/bin/python3` that ships with macOS.
+- The snapshot walker caps at 10k files per repo to stay under ~300ms even on 100k+ file monorepos, with a 24-hour TTL on stale snapshots.
+- `upgrade` never overwrites user-customized `CLAUDE.md`, `AGENTS.md`, `settings.json`, `hooks.json`, or drifted `.claude/rules/*.md` files — it reports drift and leaves them alone.
+
 ## Quick Start
 
 ```bash
 git clone https://github.com/ZaptainZ/radioheader.git
 cd radioheader
-./install.sh
+./install.sh --runtime both
 ```
 
-That's it. Start Claude Code in any project and RadioHeader is active — hooks fire, rules are loaded, experience is searchable. The installer is fault-tolerant: if your existing `settings.json` is corrupted, it backs up and rebuilds automatically instead of failing.
+That's it. Start Claude Code or Codex in any project and RadioHeader is active — hooks fire, rules are loaded, experience is searchable. The installer is fault-tolerant: if your existing `settings.json` or `~/.codex/hooks.json` is corrupted, it backs up and rebuilds automatically instead of failing.
+
+Install flags:
+
+```bash
+./install.sh --runtime claude   # only Claude Code
+./install.sh --runtime codex    # only Codex CLI
+./install.sh --runtime both     # default — both runtimes
+```
+
+Uninstalling a single runtime (`./uninstall.sh --runtime codex`) is also supported and leaves the shared data and the other runtime untouched.
 
 Optionally, run `radioheader init` inside a project to add per-project scaffolding (Echo rules, log directory, doc templates). This is not required — RadioHeader works globally without it.
 
@@ -91,7 +133,7 @@ RadioHeader (~/.claude/radioheader/)
 Project A memory/    Project B memory/    SessionStart (injected)
 ```
 
-When you solve a bug, Claude records it in the project's memory. A PostToolUse hook fires and prompts Claude to check: *is this useful cross-project?* If yes, it flows up to `topics/` with a `[source:ProjectName]` tag, then gets distilled into a `shortwave/` entry.
+When you solve a bug, the runtime records it in the project's memory. Claude uses PostToolUse to prompt the Echo step immediately; Codex snapshots the turn and uses Stop-hook continuation to ask for any missing Echo or shortwave follow-up. If the experience is useful cross-project, it flows up to `topics/` with a `[source:ProjectName]` tag, then gets distilled into a `shortwave/` entry.
 
 The three layers connect like this: experience flows back to **RadioHeader** via **Echo**, then **Shortwave** strips project noise and turns it into reusable knowledge that can be broadcast across all projects.
 
@@ -168,7 +210,7 @@ This is useful after a long session, when you finish a feature, or whenever you 
 
 | Command | Description |
 |---------|-------------|
-| `radioheader init` | Initialize the experience framework in your project |
+| `radioheader init` | Initialize the experience framework in your project (`--runtime claude|codex|both`) |
 | `radioheader search <query>` | Search across all topics, shortwave, and community |
 | `radioheader index [--rebuild]` | Build/update FTS5 search index (BM25 + synonyms) |
 | `radioheader learn <url>` | Extract web article and generate shortwave entry |
@@ -192,7 +234,7 @@ This is useful after a long session, when you finish a feature, or whenever you 
 radioheader search "white screen|slow launch|startup"
 
 # Initialize a new project with flags
-radioheader init --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
+radioheader init --runtime both --name "MyAPI" --stack "Python/FastAPI" --doc-dir docs
 
 # Enable community and sync
 radioheader community on
@@ -207,7 +249,7 @@ Built through real usage across 13 projects. Three lessons that shaped everythin
 
 **Symptom keywords > solution keywords.** Developers search "white screen" and "slow launch", not "Task.detached". Stripping symptom keywords from entries makes them unfindable. Every entry must preserve the words someone would actually search for.
 
-**Instructions beat knowledge.** Writing "experience is stored here" doesn't drive behavior. Writing "you MUST search here first" does. CLAUDE.md content must be imperative behavioral rules, not reference documentation.
+**Instructions beat knowledge.** Writing "experience is stored here" doesn't drive behavior. Writing "you MUST search here first" does. `CLAUDE.md` / `AGENTS.md` content must be imperative behavioral rules, not reference documentation.
 
 **Attention belongs in compression, not retrieval.** We initially applied attention weights to search results (boosting entries from active projects). Testing showed zero meaningful ranking changes — BM25 content matching already gets the right results. The real value of attention is in memory consolidation: compressing the user's project landscape, behavioral patterns, and known weaknesses into a digest that shapes how the Agent thinks, not what it finds.
 
