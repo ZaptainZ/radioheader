@@ -92,26 +92,61 @@ append_managed_section() {
 
 merge_codex_hooks() {
   python3 - <<PY
-import json, os
+import copy
+import json
+import os
+
 path = os.path.expanduser("$CODEX_HOOKS_JSON")
 backup = f"{path}.bak.$TIMESTAMP"
 data = {}
 if os.path.exists(path):
     with open(path) as f:
-        try:
-            data = json.load(f)
-        except Exception:
-            os.replace(path, backup)
-            data = {}
+        raw = f.read()
+    try:
+        data = json.loads(raw)
+    except Exception:
+        # Corrupt JSON: save aside and start fresh.
+        with open(backup, "w") as bf:
+            bf.write(raw)
+        data = {}
+    else:
+        # Back up valid JSON before we touch it so the user can roll back.
+        with open(backup, "w") as bf:
+            bf.write(raw)
+
 hooks = data.setdefault("hooks", {})
-changed = False
+
+# All commands RadioHeader manages. Anything matching any of these tokens is
+# considered a stale RadioHeader hook and will be stripped before re-adding.
+MANAGED_TOKENS = (
+    "check-project-architecture.sh",
+    "radioheader-loader.sh",
+    "radioheader-error-capture.sh",
+    "radioheader-codex-userprompt.py",
+    "radioheader-stop-codex.py",
+)
+
+def strip_managed(event):
+    groups = hooks.get(event, [])
+    new_groups = []
+    for group in groups:
+        new_hooks = [
+            h for h in group.get("hooks", [])
+            if not any(tok in h.get("command", "") for tok in MANAGED_TOKENS)
+        ]
+        if new_hooks:
+            new_group = copy.deepcopy(group)
+            new_group["hooks"] = new_hooks
+            new_groups.append(new_group)
+    hooks[event] = new_groups
 
 def add(event, entry):
-    global changed
-    arr = hooks.setdefault(event, [])
-    if entry not in arr:
-        arr.append(entry)
-        changed = True
+    hooks.setdefault(event, []).append(entry)
+
+before = json.dumps(data, sort_keys=True)
+
+for ev in ("SessionStart", "PostToolUse", "UserPromptSubmit", "Stop"):
+    strip_managed(ev)
 
 add("SessionStart", {
     "matcher": "startup|resume",
@@ -137,11 +172,18 @@ add("Stop", {
     ],
 })
 
+# Drop empty event arrays so the resulting file stays clean.
+for ev in list(hooks):
+    if not hooks[ev]:
+        del hooks[ev]
+
+after = json.dumps(data, sort_keys=True)
+
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w") as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write("\\n")
-print("changed" if changed else "unchanged")
+print("changed" if before != after else "unchanged")
 PY
 }
 

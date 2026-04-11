@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
@@ -36,18 +38,34 @@ def discover_doc_dir(cwd: Path) -> Path | None:
     preferred = cwd / "projectBasicInfo"
     if preferred.is_dir():
         return preferred
-    for child in cwd.iterdir():
-        if child.is_dir() and (child / "00_AGENT_RULES.md").exists():
-            return child
+    if not cwd.is_dir():
+        return None
+    try:
+        children = list(cwd.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        try:
+            if child.is_dir() and (child / "00_AGENT_RULES.md").exists():
+                return child
+        except OSError:
+            continue
     return None
 
 
-def iter_repo_files(root: Path):
+def iter_repo_files(root: Path, limit: int = 10000):
+    # Mirror the UserPromptSubmit hook's file cap so before/after snapshots
+    # walk the same set; otherwise large repos would produce massive
+    # false-positive diffs.
+    count = 0
     for current_root, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in EXCLUDED_DIRS]
         current_path = Path(current_root)
         for filename in files:
             yield current_path / filename
+            count += 1
+            if count >= limit:
+                return
 
 
 def tracked_files(cwd: Path, doc_dir: Path | None, memory_dir: Path):
@@ -146,12 +164,18 @@ def main():
         return
 
     snapshot_path = snapshot_name(session_id, turn_id, str(cwd))
-    before = {}
+    if not snapshot_path.exists():
+        # No baseline (e.g. UserPromptSubmit hook did not fire, or the
+        # snapshot was purged). Without a baseline every file looks "new",
+        # which would spam blocking messages. Exit quietly instead.
+        print(json.dumps({"continue": True}))
+        return
+
     snapshot = {}
-    if snapshot_path.exists():
-        with snapshot_path.open() as f:
-            snapshot = json.load(f)
-            before = snapshot.get("files", {})
+    before = {}
+    with snapshot_path.open() as f:
+        snapshot = json.load(f)
+        before = snapshot.get("files", {})
 
     doc_dir_raw = snapshot.get("doc_dir") or ""
     memory_dir_raw = snapshot.get("memory_dir") or ""

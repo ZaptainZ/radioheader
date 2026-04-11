@@ -3099,6 +3099,7 @@ UPGRADEHELP
   local total_projects=0
   local upgraded_projects=0
   local total_changes=0
+  local total_drift=0
   local project_entries=""
   local registry_entries_tmp
   registry_entries_tmp=$(mktemp)
@@ -3168,8 +3169,12 @@ PY
 
     local has_claude=false
     local has_codex=false
-    [ -f "$ppath/CLAUDE.md" ] || [ -f "$ppath/.claude/settings.json" ] && has_claude=true
-    [ -f "$ppath/AGENTS.md" ] || [ -f "$ppath/.codex/hooks.json" ] && has_codex=true
+    if [ -f "$ppath/CLAUDE.md" ] || [ -f "$ppath/.claude/settings.json" ]; then
+      has_claude=true
+    fi
+    if [ -f "$ppath/AGENTS.md" ] || [ -f "$ppath/.codex/hooks.json" ]; then
+      has_codex=true
+    fi
     local metadata_source=""
     local project_tech_stack="${ptech:-Unknown}"
     local project_terminology="None"
@@ -3193,6 +3198,7 @@ PY
 
     total_projects=$((total_projects + 1))
     local project_changes=0
+    local project_drift=0
 
     echo -e "  ${BOLD}$pname${NC} ($ppath)"
 
@@ -3224,6 +3230,7 @@ PY
           else
             cp "$tmpl_file" "$rules_dir/$fname"
             sedi "s|__HOME__|$HOME|g" "$rules_dir/$fname"
+            sedi "s|__DOC_DIR__|$project_doc_dir|g" "$rules_dir/$fname"
             echo -e "    ${GREEN}+${NC} Added missing: $fname"
           fi
           project_changes=$((project_changes + 1))
@@ -3231,26 +3238,25 @@ PY
       done
     fi
 
-    # --- Step 3: Update rule file contents (only if template is newer) ---
+    # --- Step 3: Report rule file drift (never overwrite customizations) ---
+    # Rules files are per-project behavioral rules. Users may customize them
+    # with project-specific guidance. We never silently overwrite; instead we
+    # warn when drift is detected so the user can resolve it intentionally
+    # (e.g. delete the file and re-run upgrade to accept the new template,
+    # or manually merge in the changes they want).
     for rule_file in "$rules_dir"/*.md; do
       local fname
       fname=$(basename "$rule_file")
       local tmpl="$template_rules_dir/$fname"
       if [ -f "$tmpl" ]; then
-        # Generate what the current template would look like with HOME expanded
         local expected
-        expected=$(sed "s|__HOME__|$HOME|g" "$tmpl")
+        expected=$(sed -e "s|__HOME__|$HOME|g" -e "s|__DOC_DIR__|$project_doc_dir|g" "$tmpl")
         local actual
         actual=$(cat "$rule_file")
         if [ "$expected" != "$actual" ]; then
-          if [ "$dry_run" = true ]; then
-            echo -e "    ${YELLOW}↻${NC} Would update content: $fname"
-          else
-            cp "$tmpl" "$rule_file"
-            sedi "s|__HOME__|$HOME|g" "$rule_file"
-            echo -e "    ${GREEN}↻${NC} Updated content: $fname"
-          fi
-          project_changes=$((project_changes + 1))
+          echo -e "    ${YELLOW}!${NC} Drift in $fname (customized or stale) — left unchanged"
+          echo -e "      ${DIM}To accept the new template: rm .claude/rules/$fname && radioheader upgrade${NC}"
+          project_drift=$((project_drift + 1))
         fi
       fi
     done
@@ -3285,15 +3291,12 @@ PY
       done
     fi
 
-    # --- Step 5: Upgrade runtime entry files ---
+    # --- Step 5: Add missing runtime entry files (never overwrite existing) ---
+    # CLAUDE.md / AGENTS.md / settings.json / hooks.json may contain user
+    # customizations (extra index entries, custom hook commands, local notes).
+    # Upgrade only fills in files that are missing; it never rewrites an
+    # existing file, even if the content differs from the current template.
     if [ "$has_claude" = true ] && [ -f "$TEMPLATES_DIR/CLAUDE.md.template" ]; then
-      local expected_claude
-      expected_claude=$(sed \
-        -e "s|__PROJECT_NAME__|$pname|g" \
-        -e "s|__TECH_STACK__|$project_tech_stack|g" \
-        -e "s|__TERMINOLOGY__|$project_terminology|g" \
-        -e "s|__DOC_DIR__|$project_doc_dir|g" \
-        "$TEMPLATES_DIR/CLAUDE.md.template")
       if [ ! -f "$ppath/CLAUDE.md" ]; then
         if [ "$dry_run" = true ]; then
           echo -e "    ${YELLOW}+${NC} Would add missing: CLAUDE.md"
@@ -3306,50 +3309,21 @@ PY
           echo -e "    ${GREEN}+${NC} Added missing: CLAUDE.md"
         fi
         project_changes=$((project_changes + 1))
-      elif [ "$(cat "$ppath/CLAUDE.md")" != "$expected_claude" ]; then
-        if [ "$dry_run" = true ]; then
-          echo -e "    ${YELLOW}↻${NC} Would update content: CLAUDE.md"
-        else
-          cp "$TEMPLATES_DIR/CLAUDE.md.template" "$ppath/CLAUDE.md"
-          sedi "s|__PROJECT_NAME__|$pname|g" "$ppath/CLAUDE.md"
-          sedi "s|__TECH_STACK__|$project_tech_stack|g" "$ppath/CLAUDE.md"
-          sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/CLAUDE.md"
-          sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/CLAUDE.md"
-          echo -e "    ${GREEN}↻${NC} Updated content: CLAUDE.md"
-        fi
-        project_changes=$((project_changes + 1))
       fi
 
-      if [ -f "$TEMPLATES_DIR/dot-claude/settings.json" ]; then
-        if [ ! -f "$ppath/.claude/settings.json" ]; then
-          if [ "$dry_run" = true ]; then
-            echo -e "    ${YELLOW}+${NC} Would add missing: .claude/settings.json"
-          else
-            mkdir -p "$ppath/.claude"
-            cp "$TEMPLATES_DIR/dot-claude/settings.json" "$ppath/.claude/settings.json"
-            echo -e "    ${GREEN}+${NC} Added missing: .claude/settings.json"
-          fi
-          project_changes=$((project_changes + 1))
-        elif ! diff -q "$TEMPLATES_DIR/dot-claude/settings.json" "$ppath/.claude/settings.json" >/dev/null 2>&1; then
-          if [ "$dry_run" = true ]; then
-            echo -e "    ${YELLOW}↻${NC} Would update content: .claude/settings.json"
-          else
-            cp "$TEMPLATES_DIR/dot-claude/settings.json" "$ppath/.claude/settings.json"
-            echo -e "    ${GREEN}↻${NC} Updated content: .claude/settings.json"
-          fi
-          project_changes=$((project_changes + 1))
+      if [ -f "$TEMPLATES_DIR/dot-claude/settings.json" ] && [ ! -f "$ppath/.claude/settings.json" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}+${NC} Would add missing: .claude/settings.json"
+        else
+          mkdir -p "$ppath/.claude"
+          cp "$TEMPLATES_DIR/dot-claude/settings.json" "$ppath/.claude/settings.json"
+          echo -e "    ${GREEN}+${NC} Added missing: .claude/settings.json"
         fi
+        project_changes=$((project_changes + 1))
       fi
     fi
 
     if [ "$has_codex" = true ] && [ -f "$TEMPLATES_DIR/AGENTS.md.template" ]; then
-      local expected_agents
-      expected_agents=$(sed \
-        -e "s|__PROJECT_NAME__|$pname|g" \
-        -e "s|__TECH_STACK__|$project_tech_stack|g" \
-        -e "s|__TERMINOLOGY__|$project_terminology|g" \
-        -e "s|__DOC_DIR__|$project_doc_dir|g" \
-        "$TEMPLATES_DIR/AGENTS.md.template")
       if [ ! -f "$ppath/AGENTS.md" ]; then
         if [ "$dry_run" = true ]; then
           echo -e "    ${YELLOW}+${NC} Would add missing: AGENTS.md"
@@ -3362,39 +3336,17 @@ PY
           echo -e "    ${GREEN}+${NC} Added missing: AGENTS.md"
         fi
         project_changes=$((project_changes + 1))
-      elif [ "$(cat "$ppath/AGENTS.md")" != "$expected_agents" ]; then
-        if [ "$dry_run" = true ]; then
-          echo -e "    ${YELLOW}↻${NC} Would update content: AGENTS.md"
-        else
-          cp "$TEMPLATES_DIR/AGENTS.md.template" "$ppath/AGENTS.md"
-          sedi "s|__PROJECT_NAME__|$pname|g" "$ppath/AGENTS.md"
-          sedi "s|__TECH_STACK__|$project_tech_stack|g" "$ppath/AGENTS.md"
-          sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/AGENTS.md"
-          sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/AGENTS.md"
-          echo -e "    ${GREEN}↻${NC} Updated content: AGENTS.md"
-        fi
-        project_changes=$((project_changes + 1))
       fi
 
-      if [ -f "$TEMPLATES_DIR/dot-codex/hooks.json" ]; then
-        if [ ! -f "$ppath/.codex/hooks.json" ]; then
-          if [ "$dry_run" = true ]; then
-            echo -e "    ${YELLOW}+${NC} Would add missing: .codex/hooks.json"
-          else
-            mkdir -p "$ppath/.codex"
-            cp "$TEMPLATES_DIR/dot-codex/hooks.json" "$ppath/.codex/hooks.json"
-            echo -e "    ${GREEN}+${NC} Added missing: .codex/hooks.json"
-          fi
-          project_changes=$((project_changes + 1))
-        elif ! diff -q "$TEMPLATES_DIR/dot-codex/hooks.json" "$ppath/.codex/hooks.json" >/dev/null 2>&1; then
-          if [ "$dry_run" = true ]; then
-            echo -e "    ${YELLOW}↻${NC} Would update content: .codex/hooks.json"
-          else
-            cp "$TEMPLATES_DIR/dot-codex/hooks.json" "$ppath/.codex/hooks.json"
-            echo -e "    ${GREEN}↻${NC} Updated content: .codex/hooks.json"
-          fi
-          project_changes=$((project_changes + 1))
+      if [ -f "$TEMPLATES_DIR/dot-codex/hooks.json" ] && [ ! -f "$ppath/.codex/hooks.json" ]; then
+        if [ "$dry_run" = true ]; then
+          echo -e "    ${YELLOW}+${NC} Would add missing: .codex/hooks.json"
+        else
+          mkdir -p "$ppath/.codex"
+          cp "$TEMPLATES_DIR/dot-codex/hooks.json" "$ppath/.codex/hooks.json"
+          echo -e "    ${GREEN}+${NC} Added missing: .codex/hooks.json"
         fi
+        project_changes=$((project_changes + 1))
       fi
 
       local codex_hooks_dir="$ppath/.codex/hooks"
@@ -3428,11 +3380,15 @@ PY
       fi
     fi
 
-    if [ "$project_changes" -eq 0 ]; then
+    if [ "$project_changes" -eq 0 ] && [ "$project_drift" -eq 0 ]; then
       echo -e "    ${GREEN}✓${NC} Already up to date"
+    elif [ "$project_changes" -eq 0 ]; then
+      echo -e "    ${YELLOW}✓${NC} No structural changes; $project_drift customized rule file(s) left as-is"
+      total_drift=$((total_drift + project_drift))
     else
       upgraded_projects=$((upgraded_projects + 1))
       total_changes=$((total_changes + project_changes))
+      total_drift=$((total_drift + project_drift))
     fi
 
   done <<< "$project_entries"
@@ -3447,11 +3403,22 @@ PY
     fi
   elif [ "$dry_run" = true ]; then
     echo -e "${BOLD}Dry run complete:${NC} $total_changes change(s) across $upgraded_projects of $total_projects project(s)"
+    if [ "$total_drift" -gt 0 ]; then
+      echo -e "${YELLOW}$total_drift customized rule file(s) detected — left unchanged.${NC}"
+    fi
     echo -e "${DIM}Run without --dry-run to apply.${NC}"
   elif [ "$total_changes" -eq 0 ]; then
-    echo -e "${GREEN}All $total_projects project(s) are up to date.${NC}"
+    if [ "$total_drift" -gt 0 ]; then
+      echo -e "${GREEN}All $total_projects project(s) are structurally up to date.${NC}"
+      echo -e "${YELLOW}$total_drift customized rule file(s) detected — review warnings above.${NC}"
+    else
+      echo -e "${GREEN}All $total_projects project(s) are up to date.${NC}"
+    fi
   else
     echo -e "${GREEN}Upgraded $upgraded_projects project(s) with $total_changes change(s).${NC}"
+    if [ "$total_drift" -gt 0 ]; then
+      echo -e "${YELLOW}$total_drift customized rule file(s) left as-is — review warnings above.${NC}"
+    fi
   fi
   echo ""
 }

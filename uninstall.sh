@@ -70,14 +70,23 @@ remove_managed_section() {
 
 clean_codex_hooks() {
   python3 - <<PY
-import json, os
+import json
+import os
+
 path = os.path.expanduser("$CODEX_HOOKS_JSON")
 if not os.path.exists(path):
     raise SystemExit(0)
 backup = f"{path}.bak.$TIMESTAMP"
-with open(path) as f:
-    data = json.load(f)
-hooks = data.get("hooks", {})
+try:
+    with open(path) as f:
+        data = json.load(f)
+except Exception:
+    # Corrupt JSON: preserve the broken file as backup and leave hooks.json
+    # untouched so the user can inspect and repair.
+    os.replace(path, backup)
+    raise SystemExit(0)
+
+hooks = data.get("hooks", {}) or {}
 targets = {
     "check-project-architecture.sh",
     "radioheader-loader.sh",
@@ -98,12 +107,28 @@ for event, groups in list(hooks.items()):
         if new_hooks:
             new_group["hooks"] = new_hooks
             kept.append(new_group)
-    hooks[event] = kept
-data["hooks"] = hooks
+    if kept:
+        hooks[event] = kept
+    else:
+        # No non-RadioHeader hooks remain for this event — drop the empty
+        # array so Codex doesn't see a stub event.
+        del hooks[event]
+
+if hooks:
+    data["hooks"] = hooks
+else:
+    # Nothing left under "hooks" — drop the key entirely.
+    data.pop("hooks", None)
+
 os.replace(path, backup)
-with open(path, "w") as f:
-    json.dump(data, f, indent=2, ensure_ascii=False)
-    f.write("\\n")
+if data:
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.write("\\n")
+else:
+    # File only contained RadioHeader-managed hooks. Leave the filesystem
+    # tidy: no empty "{}" left behind. Backup keeps the history.
+    pass
 PY
 }
 

@@ -3,8 +3,12 @@
 **Cross-project memory for Claude Code and Codex.** Stop re-solving bugs you already fixed in another project.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Runtime: Claude Code](https://img.shields.io/badge/Claude%20Code-supported-6b4bff)](https://claude.com/claude-code)
+[![Runtime: Codex CLI](https://img.shields.io/badge/Codex%20CLI-supported-10a37f)](https://developers.openai.com/codex/cli)
 
 [中文文档](README_zh.md)
+
+> **v2.0 — Codex CLI support.** RadioHeader now works on both Claude Code **and** OpenAI Codex CLI from a single install. The same `topics/`, `shortwave/`, and project memory are shared between the two runtimes; an experience captured on one agent is immediately searchable from the other. See [Runtime Support](#runtime-support) below.
 
 ## The Problem
 
@@ -48,7 +52,7 @@ From the second time onward, the same class of problem goes from minutes to seco
 
 **Three-Layer Memory** — RadioHeader (global, shared by all projects) → Project memory (project-specific) → Session context (ephemeral). Experience flows up from projects to the global hub, then back down to wherever it's needed.
 
-**Echo (Experience Flows Back)** — After each task, experience automatically flows back into the memory system. RadioHeader now supports both runtimes: Claude uses its native write hooks, while Codex closes the loop with UserPromptSubmit snapshots plus Stop-hook continuation. No manual intervention needed.
+**Echo (Experience Flows Back)** — After each task, experience automatically flows back into the memory system. The feedback loop is runtime-native: Claude Code uses `PostToolUse Write|Edit` to trigger Echo the moment memory is written; Codex CLI uses a `UserPromptSubmit` snapshot + `Stop` diff so the same "memory → topics → shortwave" chain is enforced with a `decision: block` continuation if any step is skipped. The rules fire regardless of which agent you're driving, and both runtimes share one data layer.
 
 **Shortwave (Knowledge Distillation)** — Topic entries contain project-specific details (`[source:MyApp]`). Shortwave strips out project names, file paths, and framework details into universal, project-agnostic knowledge units — searchable across any tech stack. This also protects privacy: raw entries might contain project paths, internal naming, or API keys. Shortwave removes all of that.
 
@@ -62,6 +66,34 @@ From the second time onward, the same class of problem goes from minutes to seco
 
 **Community Sharing** — Opt-in community shortwave library. Your local experience stays local; when you choose to publish, entries pass three gates (quality score ≥6/8, privacy scan, dedup check) before reaching the shared pool. Quality follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigmergy) model — like ant pheromone trails: good entries get reinforced through usage, bad entries decay naturally.
 
+## Runtime Support
+
+RadioHeader ships a single data layer (`~/.claude/radioheader/`) with **runtime adapters** that plug into whichever coding agent you're using — Claude Code, OpenAI Codex CLI, or both at once.
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| Entry file | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` |
+| Global hooks | `~/.claude/settings.json` | `~/.codex/hooks.json` |
+| SessionStart context | `radioheader-loader.sh` (plain stdout) | `radioheader-loader.sh` (plain stdout) |
+| Echo-back trigger | `PostToolUse Write\|Edit` (immediate) | `UserPromptSubmit` snapshot + `Stop` diff |
+| Search → Apply → Trace rules | Injected into `CLAUDE.md` | Injected into `AGENTS.md` |
+| Per-project scaffold | `.claude/rules/`, `.claude/settings.json`, `CLAUDE.md` | `.codex/hooks.json`, `.codex/hooks/`, `AGENTS.md` |
+
+The Codex adapter uses a **snapshot + diff** loop: the `UserPromptSubmit` hook takes a lightweight fingerprint of `memory/`, `topics/`, `shortwave/`, project docs, and up to 10k files of the repo before each turn; the `Stop` hook diffs against that fingerprint and decides what to do:
+
+- Memory changed but no global topic updated → `decision: block` with a continuation prompt asking the agent to echo the experience.
+- Topic changed but no shortwave entry distilled → `decision: block` asking for the shortwave follow-up.
+- Both sides updated → `{"continue": true}` with a `systemMessage` checklist (log writing, overview sync).
+
+This reproduces the Claude Code `PostToolUse`/`Stop` loop using the hook events Codex actually exposes, so the behavior is the same from the user's perspective: experience flows back automatically, and both runtimes see each other's knowledge.
+
+### Compatibility notes
+
+- Requires `codex-cli 0.118.0+` for the `Stop` hook and `UserPromptSubmit` hook support.
+- Python hooks target **Python 3.7+** (use `from __future__ import annotations`) — compatible with the `/usr/bin/python3` that ships with macOS.
+- The snapshot walker caps at 10k files per repo to stay under ~300ms even on 100k+ file monorepos, with a 24-hour TTL on stale snapshots.
+- `upgrade` never overwrites user-customized `CLAUDE.md`, `AGENTS.md`, `settings.json`, `hooks.json`, or drifted `.claude/rules/*.md` files — it reports drift and leaves them alone.
+
 ## Quick Start
 
 ```bash
@@ -70,11 +102,17 @@ cd radioheader
 ./install.sh --runtime both
 ```
 
-That's it. Start Claude Code or Codex in any project and RadioHeader is active — hooks fire, rules are loaded, experience is searchable. The installer is fault-tolerant: if your existing `settings.json` is corrupted, it backs up and rebuilds automatically instead of failing.
+That's it. Start Claude Code or Codex in any project and RadioHeader is active — hooks fire, rules are loaded, experience is searchable. The installer is fault-tolerant: if your existing `settings.json` or `~/.codex/hooks.json` is corrupted, it backs up and rebuilds automatically instead of failing.
 
-Runtime notes:
-- `--runtime claude|codex|both` controls which runtime adapters are installed. Default is `both`.
-- Codex support currently targets `codex-cli 0.118.0+`.
+Install flags:
+
+```bash
+./install.sh --runtime claude   # only Claude Code
+./install.sh --runtime codex    # only Codex CLI
+./install.sh --runtime both     # default — both runtimes
+```
+
+Uninstalling a single runtime (`./uninstall.sh --runtime codex`) is also supported and leaves the shared data and the other runtime untouched.
 
 Optionally, run `radioheader init` inside a project to add per-project scaffolding (Echo rules, log directory, doc templates). This is not required — RadioHeader works globally without it.
 

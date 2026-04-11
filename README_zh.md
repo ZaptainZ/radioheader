@@ -3,8 +3,12 @@
 **让 Claude Code 和 Codex 拥有跨项目记忆。** 在项目 A 踩过的坑，项目 B 不必再踩。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Runtime: Claude Code](https://img.shields.io/badge/Claude%20Code-supported-6b4bff)](https://claude.com/claude-code)
+[![Runtime: Codex CLI](https://img.shields.io/badge/Codex%20CLI-supported-10a37f)](https://developers.openai.com/codex/cli)
 
 [English](README.md)
+
+> **v2.0 — 新增 Codex CLI 支持。** 从此 RadioHeader 一次安装同时覆盖 Claude Code 和 OpenAI Codex CLI，两端共享同一份 `topics/`、`shortwave/` 和项目 memory——在任一 Agent 里捕获的经验，另一个 Agent 下一秒就能搜到并引用。详见下文[双 Runtime 支持](#双-runtime-支持)。
 
 ## 问题
 
@@ -48,7 +52,7 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **三层记忆模型** — RadioHeader（全局共享）→ 项目 memory/（项目专属）→ 会话上下文（临时）。经验从项目流向全局中枢，再流回到需要它的地方。
 
-**Echo（经验回流）** — 完成任务后，经验自动流回记忆系统。RadioHeader 现已支持双 runtime：Claude 走原生写入 hooks，Codex 走 UserPromptSubmit 快照加 Stop continuation 补偿闭环。不需要手动操作。
+**Echo（经验回流）** — 完成任务后，经验自动流回记忆系统。闭环按 runtime 原生语义实现：Claude Code 用 `PostToolUse Write|Edit` 在 memory 刚落盘的瞬间触发 Echo；Codex CLI 用 `UserPromptSubmit` 写入 turn 快照，`Stop` 时 diff 出本轮差异，一旦发现 memory → topics → shortwave 任一环节缺位，就用 `decision: block` 配合 continuation prompt 逼着 Agent 把链条补齐。同一套规则在两端都强制执行，两个 runtime 共享同一份数据层。
 
 **Shortwave（知识短波）** — Topic 条目含项目细节（`[source:MyApp]`）。短波去掉项目名、文件路径、框架细节，提炼为通用的、项目无关的知识单元——跨技术栈可搜索。这也是在保护隐私：原始条目可能包含项目路径、内部命名甚至 API key，短波会把这些全部剥离。
 
@@ -62,6 +66,34 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
 
 **社区共享** — 可选的社区短波库。你的本地经验始终留在本地；发布时经过三关检查（质量评分 ≥6/8、隐私扫描、去重检查）才能进入共享池。质量治理采用 [Stigmergy（痕迹协作）](https://zh.wikipedia.org/wiki/%E5%8D%8F%E4%BD%9C%E6%80%A7) 模型——类似蚁群信息素：好条目通过使用被强化，差条目自然衰减。
 
+## 双 Runtime 支持
+
+RadioHeader 的数据层只有一份（`~/.claude/radioheader/`），上层通过**运行时适配器**对接不同的编程 Agent——Claude Code、OpenAI Codex CLI，或两者同时使用。
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| 入口文件 | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` |
+| 全局 hooks | `~/.claude/settings.json` | `~/.codex/hooks.json` |
+| SessionStart 上下文注入 | `radioheader-loader.sh`（纯 stdout）| `radioheader-loader.sh`（纯 stdout）|
+| Echo 触发点 | `PostToolUse Write\|Edit`（即时）| `UserPromptSubmit` 快照 + `Stop` diff |
+| 搜 → 用 → 追规则 | 写入 `CLAUDE.md` | 写入 `AGENTS.md` |
+| 项目级脚手架 | `.claude/rules/`、`.claude/settings.json`、`CLAUDE.md` | `.codex/hooks.json`、`.codex/hooks/`、`AGENTS.md` |
+
+Codex 侧采用 **快照 + 差分** 的闭环：`UserPromptSubmit` hook 在每个 turn 开始前对 `memory/`、`topics/`、`shortwave/`、项目文档目录、以及项目源代码（最多 10k 文件）做一份轻量指纹；`Stop` hook 读指纹做 diff，然后按以下分支决定动作：
+
+- memory 改了但没更新任何 global topic → `decision: block`，continuation prompt 让 Agent 把这条经验 echo 到 topics/
+- topic 改了但没更新对应的 shortwave → `decision: block`，要求把跨项目经验精炼到 shortwave
+- 两端都更新了 → `{"continue": true}` 加一份 `systemMessage`，含日志撰写 / 概览同步的 checklist
+
+这套设计用 Codex 官方暴露的 hook 事件复现了 Claude Code `PostToolUse`/`Stop` 的回流闭环，用户体感一致：经验自动回流、两个 runtime 共享知识。
+
+### 兼容性说明
+
+- Codex 侧要求 `codex-cli 0.118.0+`（需要 `Stop` 和 `UserPromptSubmit` hook 事件支持）
+- Python hook 目标为 **Python 3.7+**（统一使用 `from __future__ import annotations`），兼容 macOS 自带的 `/usr/bin/python3`
+- 仓库遍历上限 10k 文件，即便在 100k+ 文件的 monorepo 里也能保持 ~300ms 内完成；陈旧快照自动按 24 小时 TTL 清理
+- `upgrade` 不会覆盖用户自定义过的 `CLAUDE.md` / `AGENTS.md` / `settings.json` / `hooks.json`，对有 drift 的 `.claude/rules/*.md` 也只报告不修改
+
 ## 快速开始
 
 ```bash
@@ -70,11 +102,17 @@ cd radioheader
 ./install.sh --runtime both
 ```
 
-搞定。启动 Claude Code 或 Codex 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。安装器具有容错能力：如果现有 `settings.json` 已损坏，会自动备份并重建，不会报错退出。
+搞定。启动 Claude Code 或 Codex 进入任何项目，RadioHeader 即刻生效——hooks 自动触发、规则自动加载、经验随时可搜。安装器具有容错能力：如果现有 `settings.json` 或 `~/.codex/hooks.json` 已损坏，会自动备份并重建，不会报错退出。
 
-运行时说明：
-- `--runtime claude|codex|both` 控制安装哪套 runtime 适配层，默认是 `both`
-- Codex 支持当前以 `codex-cli 0.118.0+` 为目标版本
+安装参数：
+
+```bash
+./install.sh --runtime claude   # 只装 Claude Code
+./install.sh --runtime codex    # 只装 Codex CLI
+./install.sh --runtime both     # 默认，两个都装
+```
+
+`./uninstall.sh --runtime codex` 支持只卸载其中一个 runtime，共享数据层和另一个 runtime 保持不动。
 
 可选：在某个项目中运行 `radioheader init` 可添加项目级脚手架（Echo 规则、日志目录、文档模板）。这不是必需的——RadioHeader 无需此步即可全局工作。
 

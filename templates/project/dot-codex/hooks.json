@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/bin/bash \"$(git rev-parse --show-toplevel)/.codex/hooks/load-project-rules.sh\""
+            "command": "/bin/bash -c 'ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); /bin/bash \"$ROOT/.codex/hooks/load-project-rules.sh\"'"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/.codex/hooks/stop-reminder.py\""
+            "command": "/bin/bash -c 'ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd); python3 \"$ROOT/.codex/hooks/stop-reminder.py\"'"
           }
         ]
       }

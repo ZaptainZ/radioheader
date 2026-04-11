@@ -12,7 +12,6 @@ Look up the 1-2 relevant documents from `CLAUDE.md` / `AGENTS.md` based on task 
 ```
 Grep pattern="keyword" path="__HOME__/.claude/radioheader/topics/"
 ```
-If more detail is needed → find the source project path from `project-registry.md` → read that project's `memory/` directory.
 If more detail is needed → resolve the source project path from `project-registry.json` / `project-registry.md` → read that project's `memory/` directory.
 
 ## Step 3: Use Grep/Glob for targeted search
