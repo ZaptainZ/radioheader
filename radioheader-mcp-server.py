@@ -86,7 +86,13 @@ def _load_search_module():
             )
             if spec and spec.loader:
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)  # type: ignore[union-attr]
+                try:
+                    spec.loader.exec_module(module)  # type: ignore[union-attr]
+                except Exception as exc:
+                    sys.stderr.write(
+                        f"radioheader-mcp-server: failed to load {candidate}: {exc}\n"
+                    )
+                    continue
                 _SEARCH_MODULE = module
                 return module
 
@@ -194,6 +200,15 @@ def _str(value: Any) -> str:
     return str(value)
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def _project_to_summary(project: dict[str, Any]) -> ProjectSummary:
     return ProjectSummary(
         name=_str(project.get("name")),
@@ -204,24 +219,28 @@ def _project_to_summary(project: dict[str, Any]) -> ProjectSummary:
         domains=list(project.get("domains") or []),
         problems=list(project.get("problems") or []),
         pain_points=list(project.get("pain_points") or []),
-        activity=float(project.get("activity") or 0.0),
-        attention_weight=float(project.get("attention_weight") or 1.0),
+        activity=_safe_float(project.get("activity"), 0.0),
+        attention_weight=_safe_float(project.get("attention_weight"), 1.0),
         last_active=_str(project.get("last_active")),
     )
 
 
+def _is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
 def _resolve_shortwave(sw_id: str) -> Path | None:
-    # Accept both full path and bare id (with or without leading "sw-").
     candidates: list[Path] = []
-    if "/" in sw_id:
-        candidates.append(Path(sw_id))
-    name = sw_id
-    if not name.endswith(".md"):
-        name_md = name if name.startswith("sw-") else f"sw-{name}"
-        candidates.append(SHORTWAVE_DIR / f"{name_md}.md")
+    name = sw_id.removesuffix(".md")
+    name_sw = name if name.startswith("sw-") else f"sw-{name}"
+    candidates.append(SHORTWAVE_DIR / f"{name_sw}.md")
     candidates.append(SHORTWAVE_DIR / f"{name}.md")
     for candidate in candidates:
-        if candidate.is_file():
+        if candidate.is_file() and _is_under(candidate, SHORTWAVE_DIR):
             return candidate
     return None
 
@@ -429,7 +448,7 @@ def radioheader_read_topic(topic_id: str, max_chars: int = 16000) -> dict[str, A
     """
     name = topic_id if topic_id.endswith(".md") else f"{topic_id}.md"
     path = TOPICS_DIR / name
-    if not path.is_file():
+    if not path.is_file() or not _is_under(path, TOPICS_DIR):
         return {"id": topic_id, "path": "", "found": False, "content": ""}
     text = _safe_read_text(path, max_chars=max_chars)
     return {

@@ -11,6 +11,7 @@ Usage:
 
 Output: JSON array of results for CLI consumption.
 """
+from __future__ import annotations
 
 import json
 import os

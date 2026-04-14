@@ -266,20 +266,33 @@ if [ "$RUNTIME" = "both" ] && [ -d "$RADIOHEADER_DIR" ]; then
   fi
 fi
 
-# --- Step 5: Remove CLI ---
+# --- Step 5: Remove CLI and companion scripts ---
+
+COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py"
+
+remove_cli_dir() {
+  local dir="$1"
+  rm -f "$dir/radioheader"
+  for pyfile in $COMPANION_SCRIPTS; do
+    rm -f "$dir/$pyfile"
+  done
+}
 
 if [ "$RUNTIME" = "both" ] && [ -f "/usr/local/bin/radioheader" ]; then
-  if [ -w "/usr/local/bin/radioheader" ]; then
-    rm "/usr/local/bin/radioheader"
+  if [ -w "/usr/local/bin" ]; then
+    remove_cli_dir "/usr/local/bin"
   else
-    sudo rm "/usr/local/bin/radioheader" 2>/dev/null || warn "Could not remove /usr/local/bin/radioheader (try: sudo rm /usr/local/bin/radioheader)"
+    sudo rm -f /usr/local/bin/radioheader 2>/dev/null || warn "Could not remove /usr/local/bin/radioheader (try: sudo rm /usr/local/bin/radioheader)"
+    for pyfile in $COMPANION_SCRIPTS; do
+      sudo rm -f "/usr/local/bin/$pyfile" 2>/dev/null
+    done
   fi
-  ok "Removed CLI from /usr/local/bin/radioheader"
+  ok "Removed CLI and companion scripts from /usr/local/bin/"
 fi
 
 if [ "$RUNTIME" = "both" ] && [ -f "$HOME/bin/radioheader" ]; then
-  rm "$HOME/bin/radioheader"
-  ok "Removed CLI from ~/bin/radioheader"
+  remove_cli_dir "$HOME/bin"
+  ok "Removed CLI and companion scripts from ~/bin/"
 fi
 
 echo ""
