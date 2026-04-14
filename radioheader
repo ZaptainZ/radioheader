@@ -674,6 +674,18 @@ EOF
     return 1
   fi
 
+  # --- RadioMind enhanced search (auto-upgrade when available) ---
+  if radiomind_available && [ "$use_fts" != "no" ]; then
+    local rm_args=("rh-search" "$pattern")
+    if [ -n "$field" ]; then
+      rm_args+=(--field "$field")
+    fi
+    if radiomind "${rm_args[@]}" 2>/dev/null; then
+      return 0
+    fi
+    warn "RadioMind search failed, falling back to native search..."
+  fi
+
   # --- FTS5 search path ---
   local fts_db="$RADIOHEADER_DIR/search.db"
   local fts_script
@@ -3761,21 +3773,12 @@ EXTRACTHEADER
 # ============================================================
 
 cmd_consolidate() {
-  local script
-  script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/attn-consolidate.py"
+  local dry_run=false
 
-  if [ ! -f "$script" ]; then
-    err "attn-consolidate.py not found at: $script"
-    return 1
-  fi
-
-  local args=("$script")
-  args+=(--radioheader-dir "$RADIOHEADER_DIR")
-
-  # Pass through flags
+  # Parse flags first (needed by both paths)
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --dry-run) args+=(--dry-run); shift ;;
+      --dry-run) dry_run=true; shift ;;
       --help|-h)
         cat <<EOF
 
@@ -3790,7 +3793,11 @@ ${BOLD}DESCRIPTION${NC}
   Like "sleep consolidation" in human memory — periodic compression
   of usage patterns into stable weights.
 
-  Actions:
+  When RadioMind is installed, consolidation is delegated to RadioMind's
+  rh-consolidate, which adds dream refinement (SHY pruning + DMN
+  wandering) and generates a richer context digest.
+
+  Actions (native):
   - Update activity scores based on last_active decay
   - Count search hits per project from search-log.jsonl
   - Recalculate attention_weight for each project
@@ -3807,6 +3814,34 @@ EOF
       *) shift ;;
     esac
   done
+
+  # --- RadioMind enhanced consolidation ---
+  if radiomind_available; then
+    info "Using RadioMind for consolidation (dream refinement + digest)"
+    local rm_args=("rh-consolidate")
+    if [ "$dry_run" = true ]; then
+      rm_args+=(--dry-run)
+    fi
+    if radiomind "${rm_args[@]}" 2>/dev/null; then
+      return 0
+    fi
+    warn "RadioMind consolidation failed, falling back to native..."
+  fi
+
+  # --- Native consolidation ---
+  local script
+  script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/attn-consolidate.py"
+
+  if [ ! -f "$script" ]; then
+    err "attn-consolidate.py not found at: $script"
+    return 1
+  fi
+
+  local args=("$script")
+  args+=(--radioheader-dir "$RADIOHEADER_DIR")
+  if [ "$dry_run" = true ]; then
+    args+=(--dry-run)
+  fi
 
   python3 "${args[@]}"
 }
