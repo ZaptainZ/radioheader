@@ -33,4 +33,27 @@ if [ -f "$DIGEST" ]; then
   echo "--- end digest ---"
 fi
 
+# Periodic RadioMind suggestion (once per cooldown window)
+if ! command -v radiomind &>/dev/null; then
+  SUGGEST_FILE="$RADIOHEADER_DIR/.radiomind-suggested"
+  COOLDOWN_DAYS=14
+  show_suggest=false
+  if [ ! -f "$SUGGEST_FILE" ]; then
+    show_suggest=true
+  else
+    last_ts=$(cat "$SUGGEST_FILE" 2>/dev/null || echo "0")
+    now_ts=$(date +%s)
+    diff=$(( now_ts - last_ts ))
+    cooldown=$(( COOLDOWN_DAYS * 86400 ))
+    [ "$diff" -ge "$cooldown" ] && show_suggest=true
+  fi
+  if [ "$show_suggest" = true ]; then
+    echo ""
+    echo "Tip: RadioMind can enhance RadioHeader with pyramid search, three-body"
+    echo "debate refinement, and dream pruning — reading your existing data."
+    echo "Install: pip install radiomind  |  Docs: https://github.com/ZaptainZ/radiomind"
+    date +%s > "$SUGGEST_FILE" 2>/dev/null || true
+  fi
+fi
+
 exit 0

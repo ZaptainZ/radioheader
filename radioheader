@@ -39,6 +39,54 @@ ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[RadioHeader]${NC} $1"; }
 err()   { echo -e "${RED}[RadioHeader]${NC} $1"; }
 
+radiomind_available() {
+  command -v radiomind &>/dev/null
+}
+
+RADIOMIND_SUGGEST_FILE="$RADIOHEADER_DIR/.radiomind-suggested"
+RADIOMIND_SUGGEST_COOLDOWN_DAYS=14
+
+radiomind_suggest_due() {
+  # Returns 0 (true) if we haven't suggested recently
+  if radiomind_available; then
+    return 1
+  fi
+  if [ ! -f "$RADIOMIND_SUGGEST_FILE" ]; then
+    return 0
+  fi
+  local last_ts
+  last_ts=$(cat "$RADIOMIND_SUGGEST_FILE" 2>/dev/null || echo "0")
+  local now_ts
+  now_ts=$(date +%s)
+  local diff=$(( now_ts - last_ts ))
+  local cooldown=$(( RADIOMIND_SUGGEST_COOLDOWN_DAYS * 86400 ))
+  [ "$diff" -ge "$cooldown" ]
+}
+
+radiomind_mark_suggested() {
+  date +%s > "$RADIOMIND_SUGGEST_FILE" 2>/dev/null || true
+}
+
+print_radiomind_suggestion() {
+  echo ""
+  echo -e "${BLUE}────────────────────────────────────────${NC}"
+  echo -e "${BOLD}Enhance RadioHeader with RadioMind${NC}"
+  echo ""
+  echo "  RadioMind is a bionic memory core that reads your existing"
+  echo "  RadioHeader data and adds:"
+  echo ""
+  echo "  • Enhanced search — pyramid retrieval + knowledge graph"
+  echo "  • Active refinement — three-body debate strengthens entries"
+  echo "  • Dream pruning — outdated entries auto-decay"
+  echo "  • Works alongside RadioHeader — zero config, shared data layer"
+  echo ""
+  echo "  Install: pip install radiomind"
+  echo "  Docs:    https://github.com/ZaptainZ/radiomind"
+  echo -e "${BLUE}────────────────────────────────────────${NC}"
+  echo ""
+  radiomind_mark_suggested
+}
+
 project_runtime_summary() {
   local modes=()
   [ -f "CLAUDE.md" ] && modes+=("claude")
@@ -554,6 +602,10 @@ with open('$REGISTRY_JSON', 'w') as f:
     echo "Next: Open this project with Claude Code to start using RadioHeader."
   else
     echo "Next: Open this project with Codex to start using RadioHeader."
+  fi
+
+  if ! radiomind_available; then
+    print_radiomind_suggestion
   fi
   echo ""
 }
@@ -1127,6 +1179,17 @@ PY
   fi
 
   echo -e "  Project runtime: $(project_runtime_summary)"
+
+  echo ""
+  echo -e "${BOLD}RadioMind${NC}"
+  if radiomind_available; then
+    local rm_version
+    rm_version=$(radiomind --version 2>/dev/null || echo "unknown")
+    echo -e "  Status:     ${GREEN}ON${NC} ($rm_version)"
+  else
+    echo -e "  Status:     ${DIM}NOT INSTALLED${NC} (optional — pip install radiomind)"
+  fi
+
   echo ""
 }
 
@@ -1516,6 +1579,22 @@ PY
     echo -e "  ${DIM}–${NC} Not installed (optional — enables 'radioheader learn' command)"
     echo -e "  ${DIM}  Install gives Claude Code the ability to read walled-garden articles${NC}"
     echo -e "  ${DIM}  (WeChat, Medium, Substack) and save 60-70% tokens on web content.${NC}"
+  fi
+
+  # --- Optional: RadioMind ---
+  echo ""
+  echo -e "${BOLD}Optional: RadioMind${NC}"
+
+  if radiomind_available; then
+    local rm_version
+    rm_version=$(radiomind --version 2>/dev/null || echo "unknown")
+    echo -e "  ${GREEN}✓${NC} RadioMind installed ($rm_version)"
+    echo -e "  ${DIM}(Enhanced search, three-body refinement, dream pruning — reading your RadioHeader data)${NC}"
+  else
+    echo -e "  ${DIM}–${NC} Not installed (optional — enhances RadioHeader with deeper memory refinement)"
+    echo -e "  ${DIM}  Install: pip install radiomind${NC}"
+    echo -e "  ${DIM}  Adds: pyramid search, knowledge graph, three-body debate, dream pruning${NC}"
+    echo -e "  ${DIM}  Works alongside RadioHeader — reads the same topics/ and shortwave/ files${NC}"
   fi
 
   # --- Summary ---
