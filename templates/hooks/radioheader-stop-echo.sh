@@ -31,4 +31,29 @@ if community_enabled && [ -d "$COMMUNITY_POOL" ]; then
   echo "📡 Community vote: If you referenced community/pool/ entries, evaluate causal contribution and append votes to ~/.claude/radioheader/pending-votes.jsonl"
 fi
 
+# Part 3: RadioMind refine-step trigger
+# When RadioMind is installed, prime a three-body debate by outputting the
+# Guardian prompt. Claude will reason about it in the next turn, and the
+# user can continue the debate with `radiomind refine-step guardian -r "..."`
+if command -v radiomind &>/dev/null; then
+  # Pick the most recently touched domain from the session's memory writes
+  RECENT_DOMAIN=""
+  if [ -d "$RADIOHEADER_DIR/topics" ]; then
+    RECENT_FILE=$(ls -t "$RADIOHEADER_DIR/topics/"*.md 2>/dev/null | head -1)
+    if [ -n "$RECENT_FILE" ]; then
+      RECENT_DOMAIN=$(basename "$RECENT_FILE" .md | sed 's/^[0-9]*-//')
+    fi
+  fi
+
+  REFINE_OUTPUT=$(radiomind refine-step prepare ${RECENT_DOMAIN:+--domain "$RECENT_DOMAIN"} 2>/dev/null)
+  if [ $? -eq 0 ] && [ -n "$REFINE_OUTPUT" ]; then
+    echo ""
+    echo "🧠 RadioMind debate prompt (Guardian perspective):"
+    echo "$REFINE_OUTPUT"
+    echo ""
+    echo "To continue: respond to the prompt above, then run:"
+    echo "  radiomind refine-step guardian -r \"<your response>\""
+  fi
+fi
+
 exit 0

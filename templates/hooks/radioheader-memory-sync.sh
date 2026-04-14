@@ -14,7 +14,7 @@ FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 CONSOLIDATE_COUNTER="$HOME/.claude/radioheader/.consolidate-counter"
 CONSOLIDATE_THRESHOLD=5
 
-if echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/"; then
+if echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/\|radioheader/shortwave/"; then
   # Increment counter
   count=0
   if [ -f "$CONSOLIDATE_COUNTER" ]; then
@@ -31,6 +31,11 @@ if echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/"; then
     fi
   else
     echo "$count" > "$CONSOLIDATE_COUNTER"
+  fi
+
+  # --- RadioMind ingest: feed written content as knowledge ---
+  if command -v radiomind &>/dev/null && [ -n "$FILE_PATH" ] && [ -f "$FILE_PATH" ]; then
+    radiomind learn "$(cat "$FILE_PATH" 2>/dev/null | head -c 8000)" >/dev/null 2>&1 &
   fi
 fi
 

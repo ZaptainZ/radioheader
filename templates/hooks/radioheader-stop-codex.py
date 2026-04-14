@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -282,6 +284,38 @@ def main():
         messages.append(f"Project logs changed: {summarize_paths(log_changes, cwd)}.")
     if (RADIOHEADER_DIR / "community" / "pool").is_dir():
         messages.append("If you used community entries, evaluate causal contribution and append votes.")
+
+    # --- RadioMind ingest: feed changed memory/topic/shortwave content ---
+    if shutil.which("radiomind"):
+        ingest_paths = memory_changes + topic_changes + shortwave_changes
+        for p in ingest_paths[:5]:
+            try:
+                text = Path(p).read_text(encoding="utf-8")[:8000]
+                subprocess.run(
+                    ["radiomind", "learn", text],
+                    capture_output=True, timeout=10,
+                )
+            except Exception:
+                pass
+
+        # --- RadioMind refine-step: prime three-body debate ---
+        if memory_changes or topic_changes:
+            domain = ""
+            if topic_changes:
+                domain = Path(topic_changes[0]).stem
+            try:
+                result = subprocess.run(
+                    ["radiomind", "refine-step", "prepare"]
+                    + (["--domain", domain] if domain else []),
+                    capture_output=True, text=True, timeout=15,
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    messages.append(
+                        "RadioMind debate prompt (Guardian): "
+                        + result.stdout.strip()[:500]
+                    )
+            except Exception:
+                pass
 
     output = {"continue": True}
     if messages:
