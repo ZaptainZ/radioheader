@@ -219,7 +219,9 @@ radioheader doctor
 
 ## RadioMind 集成
 
-安装了 [RadioMind](https://github.com/ZaptainZ/radiomind) 后，RadioHeader **自动升级自身**——不需要任何配置：
+[RadioMind](https://github.com/ZaptainZ/radiomind) 是 AI Agent 的仿生记忆核心——它通过三体辩论和做梦修剪把零散对话提炼为深层习惯，在需要的时候把它们送回来。RadioHeader 负责捕获和行为强制，RadioMind 负责精炼和深化。
+
+安装了 RadioMind 后，RadioHeader **自动升级自身**——不需要任何配置：
 
 | 命令 | 没有 RadioMind | 有 RadioMind |
 |------|--------------|-------------|
@@ -236,6 +238,33 @@ radioheader search ── radiomind? 是 ─→ radiomind rh-search
                   └── 否 ─→ fts-search.py（原生）
 radioheader consolidate ─ radiomind? → radiomind rh-consolidate
                         └── 否 ─→ attn-consolidate.py（原生）
+```
+
+## 社区库
+
+[radioheader-community](https://github.com/ZaptainZ/radioheader-community) 是一个可选的社区共享短波库。你的本地经验始终留在本地；你选择发布的条目需过三关才能进入共享池。
+
+```bash
+radioheader community on          # 启用
+radioheader sync                  # 拉取共享库 + 上传投票
+radioheader publish <文件>         # 发布（质量 ≥6/8 + 隐私 + 去重）
+```
+
+质量治理采用 [Stigmergy（信息素）](https://zh.wikipedia.org/wiki/%E5%8D%8F%E4%BD%9C%E6%80%A7) 模型——类似蚁群：好条目通过使用被强化，差条目自然衰减，不需要人工管理。
+
+| 阶段 | 发生什么 |
+|------|---------|
+| **曝光** | 新条目获得 30 天曝光窗口 |
+| **投票** | 使用触发自动 LLM 评判（因果贡献投票） |
+| **汇总** | GitHub Actions 每周汇总投票为质量分 |
+| **生命周期** | 高分条目标记 `verified`；低分条目衰减并归档 |
+
+启用后，搜索结果混合三个来源并有明确优先级：
+
+```
+📡 Shortwave（本地精炼）  — 你自己的经验（最高优先级）
+🌐 Community（社区共享）  — 来自其他用户的条目，带质量分
+📂 Topics（详细）         — 带 [source:] 标签的原始条目
 ```
 
 ---

@@ -219,7 +219,9 @@ radioheader doctor
 
 ## RadioMind integration
 
-When [RadioMind](https://github.com/ZaptainZ/radiomind) is installed, RadioHeader **automatically upgrades itself** — no config needed:
+[RadioMind](https://github.com/ZaptainZ/radiomind) is a bionic memory core for AI agents — it distills scattered conversations into deep habits through three-body debate and dream refinement, then serves them back when they matter. RadioHeader captures and enforces; RadioMind refines and deepens.
+
+When RadioMind is installed, RadioHeader **automatically upgrades itself** — no config needed:
 
 | Command | Without RadioMind | With RadioMind |
 |---------|-------------------|----------------|
@@ -236,6 +238,33 @@ radioheader search ─── radiomind? yes ──→ radiomind rh-search
                    └── no ──→ fts-search.py (native)
 radioheader consolidate ── radiomind? ──→ radiomind rh-consolidate
                         └── no ──→ attn-consolidate.py (native)
+```
+
+## Community library
+
+[radioheader-community](https://github.com/ZaptainZ/radioheader-community) is an opt-in shared library of shortwave entries contributed by the RadioHeader community. Your local experience stays local; entries you choose to publish pass three gates before reaching the shared pool.
+
+```bash
+radioheader community on          # enable
+radioheader sync                  # pull shared library + push your votes
+radioheader publish <file>        # publish (quality ≥6/8 + privacy + dedup)
+```
+
+Quality governance follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigmergy) model — like ant pheromone trails: good entries get reinforced through usage, bad entries decay naturally, no human curation needed.
+
+| Step | What happens |
+|------|-------------|
+| **Exposure** | New entries get a 30-day exposure window |
+| **Voting** | Usage triggers automatic LLM-judged causal contribution votes |
+| **Aggregation** | GitHub Actions aggregates votes weekly into quality scores |
+| **Lifecycle** | High-score entries get `verified`; low-score entries decay and archive |
+
+When enabled, search results blend three sources with clear priority:
+
+```
+📡 Shortwave (local)     — your own experience (highest priority)
+🌐 Community (shared)    — entries from other users, with quality scores
+📂 Topics (detailed)     — raw topic entries with [source:] tags
 ```
 
 ---
