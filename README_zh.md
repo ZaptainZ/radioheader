@@ -196,6 +196,21 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 
 发布需过三关：质量（≥6/8）、隐私扫描（无路径/密钥/来源标签）、去重检查。
 
+### MCP 服务
+
+RadioHeader 内置可选的 MCP 服务，任何支持 [Model Context Protocol](https://modelcontextprotocol.io/) 的 Agent — Cursor、Claude Desktop、Windsurf、Continue.dev — 都可以直接查询同一份经验层：
+
+```bash
+pip install "mcp[cli]"                    # 一次性依赖
+radioheader mcp-server                    # 启动 stdio 服务
+```
+
+服务暴露 8 个只读工具（`radioheader_search` / `radioheader_list_projects` / `radioheader_trace_project` / `radioheader_read_shortwave` / `radioheader_read_topic` / `radioheader_list_topics` / `radioheader_context_digest` / `radioheader_stats`），底层共用 CLI 的 FTS5 + 同义词搜索引擎。
+
+详见 [docs/mcp-server.md](docs/mcp-server.md) 了解各客户端配置和推荐 system prompt。
+
+> **提示：** 如果你使用 [RadioMind](https://github.com/ZaptainZ/radiomind)，它的 MCP 服务已经包含了 RadioHeader 搜索能力，无需同时配置两个。
+
 ## 使用技巧
 
 **主动触发 Echo。** Hooks 会自动处理大部分回流，但你也可以随时用自然语言告诉 Claude：
@@ -228,6 +243,7 @@ Echo 从踩坑中捕获经验。`learn` 从文章中捕获知识：
 | `radioheader vote <id> [+1\|-1]` | 投票评价短波条目 |
 | `radioheader device-sync init <url>` | 跨设备同步初始化（via git） |
 | `radioheader device-sync push\|pull` | 在设备间推送/拉取 RadioHeader 数据 |
+| `radioheader mcp-server` | 启动 MCP 服务（stdio），供 Cursor / Claude Desktop 等使用 |
 
 ```bash
 # 按症状搜索，不是按解法搜索

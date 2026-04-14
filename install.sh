@@ -525,9 +525,12 @@ echo ""
 info "Running post-install initialization..."
 
 # Copy Python scripts alongside CLI
-for pyfile in fts-index.py fts-search.py attn-consolidate.py; do
+for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py; do
   if [ -f "$SCRIPT_DIR/$pyfile" ]; then
     cp "$SCRIPT_DIR/$pyfile" "$(dirname "$CLI_INSTALLED")/$pyfile"
+    if [[ "$pyfile" == "radioheader-mcp-server.py" ]]; then
+      chmod +x "$(dirname "$CLI_INSTALLED")/$pyfile"
+    fi
   fi
 done
 

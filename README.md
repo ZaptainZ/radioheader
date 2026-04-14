@@ -196,6 +196,21 @@ The quality lifecycle follows a [Stigmergy](https://en.wikipedia.org/wiki/Stigme
 
 Publishing goes through three gates: quality (≥6/8), privacy scan (no paths/keys/source tags), and dedup check.
 
+### MCP Server
+
+RadioHeader ships an optional MCP server so any [Model Context Protocol](https://modelcontextprotocol.io/)-compatible agent — Cursor, Claude Desktop, Windsurf, Continue.dev — can query the same experience layer:
+
+```bash
+pip install "mcp[cli]"                    # one-time dependency
+radioheader mcp-server                    # starts stdio server
+```
+
+The server exposes 8 read-only tools (`radioheader_search`, `radioheader_list_projects`, `radioheader_trace_project`, `radioheader_read_shortwave`, `radioheader_read_topic`, `radioheader_list_topics`, `radioheader_context_digest`, `radioheader_stats`) backed by the same FTS5 + synonym search the CLI uses.
+
+See [docs/mcp-server.md](docs/mcp-server.md) for client-specific setup (Claude Desktop, Cursor, etc.) and a recommended system prompt.
+
+> **Note:** If you use [RadioMind](https://github.com/ZaptainZ/radiomind), its MCP server already includes RadioHeader search — you don't need both.
+
 ## Tips
 
 **Manually trigger Echo.** Hooks handle most of it automatically, but you can also tell Claude in plain language at any time:
@@ -228,6 +243,7 @@ This is useful after a long session, when you finish a feature, or whenever you 
 | `radioheader vote <id> [+1\|-1]` | Vote on a shortwave entry |
 | `radioheader device-sync init <url>` | Set up cross-device sync via git |
 | `radioheader device-sync push\|pull` | Push/pull RadioHeader data between devices |
+| `radioheader mcp-server` | Run the MCP server (stdio) for Cursor, Claude Desktop, etc. |
 
 ```bash
 # Search by symptoms, not solutions
@@ -264,6 +280,7 @@ See [docs/lessons-learned.md](docs/lessons-learned.md) for the full list.
 | [Shortwave Spec](docs/shortwave-spec.md) | Shortwave format, refinement rules |
 | [Writing Good Entries](docs/writing-good-entries.md) | Format, keywords, and examples |
 | [Lessons Learned](docs/lessons-learned.md) | What we tried, what failed, what works |
+| [MCP Server](docs/mcp-server.md) | Setup guide for Cursor, Claude Desktop, etc. |
 | [Example Topics](examples/topics/) | Sample topic file |
 
 ## License

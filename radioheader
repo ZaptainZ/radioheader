@@ -146,6 +146,7 @@ ${BOLD}COMMANDS${NC}
   vote        Vote on a shortwave entry (+1 or -1)
   device-sync Sync RadioHeader data across devices via git
   consolidate Update project attention weights (memory consolidation)
+  mcp-server  Run the RadioHeader MCP server (stdio) for MCP-compatible agents
   help        Show this help message
 
 ${BOLD}EXAMPLES${NC}
@@ -175,6 +176,8 @@ ${BOLD}EXAMPLES${NC}
   radioheader vote sw-ios-preview-crash -1 "outdated"
   radioheader consolidate                              # update attention weights
   radioheader consolidate --dry-run                    # preview changes
+  radioheader mcp-server                                # run MCP server (stdio) for
+                                                       # Cursor / Claude Desktop / etc.
 
 EOF
 }
@@ -3733,6 +3736,26 @@ EOF
 # Main — subcommand routing
 # ============================================================
 
+cmd_mcp_server() {
+  # Exec the MCP server script installed next to this CLI binary. Users
+  # configure their MCP client to run `radioheader mcp-server`, which is
+  # stable even if the user later moves the data layer or renames the
+  # install directory.
+  local script_dir
+  script_dir=$(cd "$(dirname "$0")" && pwd)
+  local server="$script_dir/radioheader-mcp-server.py"
+  if [ ! -f "$server" ]; then
+    err "radioheader-mcp-server.py not found at $server"
+    err "Re-run install.sh to install the MCP server script."
+    return 1
+  fi
+  if ! command -v python3 &>/dev/null; then
+    err "python3 is required to run the MCP server."
+    return 1
+  fi
+  exec python3 "$server" "$@"
+}
+
 case "${1:-help}" in
   init)         shift; cmd_init "$@" ;;
   search)       shift; cmd_search "$@" ;;
@@ -3748,6 +3771,7 @@ case "${1:-help}" in
   vote)         shift; cmd_vote "$@" ;;
   device-sync)  shift; cmd_device_sync "$@" ;;
   consolidate)  shift; cmd_consolidate "$@" ;;
+  mcp-server)   shift; cmd_mcp_server "$@" ;;
   help|--help|-h) cmd_help ;;
   --version|-v) echo "radioheader v$VERSION" ;;
   *)
