@@ -24,6 +24,23 @@ CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 # Default community repository (users can override in config.json)
 DEFAULT_COMMUNITY_REPO="https://github.com/ZaptainZ/radioheader-community.git"
 
+# Resolve a Python 3.7+ interpreter (FTS5 search/index need `from __future__ import
+# annotations`; some macOS users have a legacy /usr/local/bin/python3 3.6.x ahead
+# of newer interpreters on PATH). Override via RH_PY_OVERRIDE env var.
+_resolve_py3() {
+  local p
+  for p in "${RH_PY_OVERRIDE:-}" python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3.11 /usr/local/bin/python3.10 /usr/local/bin/python3.9; do
+    [ -z "$p" ] && continue
+    if command -v "$p" >/dev/null 2>&1 && "$p" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 7) else 1)' 2>/dev/null; then
+      echo "$p"
+      return 0
+    fi
+  done
+  echo "python3"
+  return 1
+}
+RH_PY="$(_resolve_py3)"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -717,15 +734,15 @@ EOF
       fi
 
       local fts_output
-      fts_output=$(python3 "${fts_args[@]}" 2>/dev/null)
+      fts_output=$("$RH_PY" "${fts_args[@]}" 2>/dev/null)
       if [ $? -ne 0 ] || [ -z "$fts_output" ]; then
         warn "FTS5 search failed, falling back to grep..."
       else
         # Parse and display FTS5 results
         local fts_count
-        fts_count=$(echo "$fts_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['count'])" 2>/dev/null)
+        fts_count=$(echo "$fts_output" | "$RH_PY" -c "import json,sys; d=json.load(sys.stdin); print(d['count'])" 2>/dev/null)
         local fts_expanded
-        fts_expanded=$(echo "$fts_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print(', '.join(d['expanded']))" 2>/dev/null)
+        fts_expanded=$(echo "$fts_output" | "$RH_PY" -c "import json,sys; d=json.load(sys.stdin); print(', '.join(d['expanded']))" 2>/dev/null)
 
         if [ "${fts_count:-0}" -eq 0 ]; then
           local search_desc="$pattern"
@@ -750,7 +767,7 @@ EOF
         local rank_mode="BM25"
         if [ "$use_attention" = "yes" ]; then
           local has_attention
-          has_attention=$(echo "$fts_output" | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('attention') else 'no')" 2>/dev/null)
+          has_attention=$(echo "$fts_output" | "$RH_PY" -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('attention') else 'no')" 2>/dev/null)
           if [ "$has_attention" = "yes" ]; then
             rank_mode="BM25 + Attention"
           fi
@@ -760,7 +777,7 @@ EOF
         # Show project attention scores if available
         if [ "$use_attention" = "yes" ]; then
           local attn_scores
-          attn_scores=$(echo "$fts_output" | python3 -c "
+          attn_scores=$(echo "$fts_output" | "$RH_PY" -c "
 import json,sys
 d=json.load(sys.stdin)
 ps=d.get('project_scores',{})
@@ -775,7 +792,7 @@ if ps:
         echo ""
 
         # Display results grouped by source
-        echo "$fts_output" | python3 -c "
+        echo "$fts_output" | "$RH_PY" -c "
 import json, sys
 d = json.load(sys.stdin)
 by_source = {'shortwave': [], 'community': [], 'topic': []}
@@ -982,13 +999,13 @@ cmd_index() {
     return 1
   fi
 
-  if ! command -v python3 &>/dev/null; then
-    err "python3 is required for FTS5 indexing."
+  if [ -z "$RH_PY" ] || ! command -v "$RH_PY" >/dev/null 2>&1; then
+    err "Python 3.7+ is required for FTS5 indexing. Set RH_PY_OVERRIDE to a working interpreter."
     return 1
   fi
 
   info "Building FTS5 search index..."
-  python3 "$index_script" --db "$RADIOHEADER_DIR/search.db" --radioheader-dir "$RADIOHEADER_DIR" $rebuild
+  "$RH_PY" "$index_script" --db "$RADIOHEADER_DIR/search.db" --radioheader-dir "$RADIOHEADER_DIR" $rebuild
   ok "Search index ready. Use 'radioheader search' to search with BM25 ranking + synonym expansion."
 }
 
