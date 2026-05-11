@@ -6,10 +6,15 @@ RADIOHEADER_DIR="$HOME/.claude/radioheader"
 
 if [ -d "$RADIOHEADER_DIR/topics" ]; then
   TOPIC_COUNT=$(ls "$RADIOHEADER_DIR/topics/"*.md 2>/dev/null | wc -l | tr -d ' ')
+  SHORTWAVE_COUNT=$(ls "$RADIOHEADER_DIR/shortwave/"*.md 2>/dev/null | wc -l | tr -d ' ')
+  PROJECT_COUNT=$(python3 -c "import json;print(len(json.load(open('$RADIOHEADER_DIR/project-registry.json')).get('projects',[])))" 2>/dev/null || echo "?")
   if [ "$TOPIC_COUNT" -gt 0 ]; then
     echo ""
-    echo "RadioHeader ready (${TOPIC_COUNT} topic files)"
-    echo "  Search: Grep pattern=\"keyword\" path=\"$RADIOHEADER_DIR/topics/\""
+    echo "RadioHeader: your cross-project memory CLI (~/.claude/radioheader/)"
+    echo "  Holds:  ${SHORTWAVE_COUNT} shortwave entries + ${TOPIC_COUNT} topic files from ${PROJECT_COUNT} projects you've worked on"
+    echo "  Query:  radioheader search \"<symptom>\"   — FTS5 + 中英同义词扩展 (白屏 ↔ blank screen)"
+    echo "  Tip:    symptom words (白屏/闪退/错位/丢失/慢), not action words; for multi-symptom use OR: \"白屏|闪退\""
+    echo "          spaces = AND-strict (usually miss); Chinese hits more than English; no stemming"
     echo "  Index:  $RADIOHEADER_DIR/INDEX.md"
     echo ""
   fi

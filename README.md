@@ -69,7 +69,8 @@ Conversation (bug fix, feature, debugging session)
                              ▼
  ┌─ Search → Apply → Trace ──────────────────────────┐
  │  Next time any agent hits a similar problem:       │
- │  1. Search: Grep with symptom keywords             │
+ │  1. Search: radioheader search "<symptom>"         │
+ │           (FTS5 + bilingual synonym expansion)     │
  │  2. Apply:  Cite the matching entry in the answer  │
  │  3. Trace:  Follow [source:] to the origin project │
  └──────────────────────────────────────────────────┘

@@ -109,6 +109,30 @@ This provides a visible, session-start reminder that RadioHeader exists and how 
 
 **Takeaway**: Curation is more important than accumulation. A smaller, accurate knowledge base is more valuable than a larger one with stale entries.
 
+## Lesson 8: The Instruction Must Match the Tool's Actual Behavior
+
+**The problem**: The SessionStart loader once told agents `Search: Grep pattern="keyword" path="topics/"`. Agents dutifully ran a single broad `Grep`, got dozens of file names with no snippets, and skipped the result as background noise. Meanwhile, the actual tool — `radioheader search`, with FTS5 + bilingual synonym expansion — was never mentioned. The instruction was teaching a degraded fallback, not the real entry point.
+
+**Why it kept failing in layers**: Fixing the loader exposed deeper layers:
+
+- **L1 — Wrong tool name**: instruction said `Grep`, not `radioheader search`. Agents followed the instruction literally and missed FTS5 entirely.
+- **L2 — Strong-imperative drag**: even after pointing at the right CLI, `MUST search / PROHIBITED to ignore` framing produced ritual searches (run-and-skip) rather than judgment-based use.
+- **L3 — The CLI silently broken**: `radioheader search` itself failed under any user with a legacy `/usr/local/bin/python3` 3.6.x ahead of newer interpreters on PATH — Python 3.6 doesn't support `from __future__ import annotations`, which the FTS5 helper requires.
+- **L4 — Wrong query syntax in the docs**: even with a working CLI, instructions suggested space-separated multi-symptom queries (`"白屏 闪退"`). FTS5 defaults to AND-strict; that query returns 0. The correct multi-symptom syntax is OR pipe: `"白屏|闪退"` (~18 hits with synonym expansion on both terms).
+
+**The fixes** (applied as a stack):
+
+1. **Loader teaches the real tool**: `radioheader search "<symptom>"` with a one-line value statement, not a fallback `Grep`.
+2. **`CLAUDE.md` / `AGENTS.md` "search" section uses descriptive language** (what's inside, when it's worth searching, search craft signals) instead of `MUST` / `PROHIBITED`. Echo and onboarding remain strong-imperative because skipping them is asymmetrically destructive.
+3. **CLI auto-resolves Python ≥ 3.7**: a `_resolve_py3` wrapper in the `radioheader` script tries `python3`, then `/usr/bin/python3`, then `/opt/homebrew/bin/python3`, then `python3.{11,10,9}` — picking the first interpreter that satisfies the version requirement. Override with `RH_PY_OVERRIDE` if needed.
+4. **OR pipe documented as the primary multi-symptom syntax**: `radioheader search "A|B"` runs OR with synonym expansion on every term. Space-separated queries are explicitly marked as the trap they are.
+
+**Takeaways**:
+
+- The instruction surface (loader output + `CLAUDE.md` rules) is part of the tool, not metadata around it. If the docs say `Grep` and the actual entry point is FTS5, agents follow the docs and the tool's strength is invisible.
+- Trusting LLM judgment requires the tool description to be **literally correct and runnable** — listing the command, what's inside, when it's worth running, and the syntax traps. Strong imperatives are no substitute for an accurate map.
+- When a layer of fix uncovers a deeper layer (loader → docs → CLI runtime → query syntax), the bug isn't "the LLM didn't try hard enough" — it's that the previous layer was masking the next.
+
 ## Anti-Patterns to Avoid
 
 1. **Making RadioHeader a database**: It's a collection of text files searched with `Grep`. Don't add schemas, APIs, or query languages.
