@@ -46,7 +46,7 @@ A CLI-indexed knowledge base of pitfalls and solutions accumulated across this u
 **Project documentation obligations (for projects with the dynamic experience framework):**
 
 6. **Project info sync (MUST)**: If the project's architecture, key paths, tech stack, or important configurations changed during this session → MUST update the project overview document (the file listed as project overview in CLAUDE.md, typically `projectBasicInfo/01_PROJECT_OVERVIEW.md`). Do NOT skip this — stale project docs cause repeated re-exploration in future sessions.
-7. **Task logs (MUST)**: If you completed a significant task (bug fix, feature development, architecture change, deployment, refactoring) → MUST write a log entry in the project's logs directory (typically `projectBasicInfo/logs/YYYY-MM-DD-topic-cc.md`). Content: background, goal, approach, modified files, issues encountered, conclusion. This is NOT optional for significant work.
+7. **Task logs (MUST)**: If you completed a significant task (bug fix, feature development, architecture change, deployment, refactoring) → MUST write a log entry in the project's logs directory (typically `projectBasicInfo/logs/YYYY-MM-DD-topic-<role>.md`, where `<role>` identifies the author: `cc` for Claude Code, `codex` for Codex, or initials/short name for a human author — do NOT default to `cc` if you are not Claude Code). Content: background, goal, approach, modified files, issues encountered, conclusion. This is NOT optional for significant work.
 
 **PROHIBITED**: Completing significant work without checking items 6 and 7. The PostToolUse hook will remind you when memory/ is updated, but you MUST also check proactively at the end of a task series.
 

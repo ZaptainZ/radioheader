@@ -10,9 +10,21 @@
 
 ## Naming Format
 
-`YYYY-MM-DD-english-topic-role.md`
+`YYYY-MM-DD-english-topic-<role>.md`
 
-Example: `2026-02-08-auth-system-design-cc.md`
+`<role>` identifies the author so future readers can trace who wrote each log. **Pick the suffix that matches who you are — do not default to `cc` regardless of identity.**
+
+| If you are | Use suffix |
+|------------|------------|
+| Claude Code | `cc` |
+| Codex | `codex` |
+| Other AI agent | the agent's short name (e.g. `cursor`, `aider`) |
+| Human author | your initials or short name (e.g. `zt`, `alex`) |
+
+Examples:
+- `2026-02-08-auth-system-design-cc.md` (written by Claude Code)
+- `2026-02-08-deploy-rollback-codex.md` (written by Codex)
+- `2026-02-08-perf-investigation-zt.md` (written by a human, initials `zt`)
 
 ## Principles
 
