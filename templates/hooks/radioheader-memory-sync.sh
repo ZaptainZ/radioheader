@@ -10,11 +10,30 @@ command -v jq &>/dev/null || exit 0
 INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 
+# --- Opt-in gate: RadioMind-backed background automation (deny-by-default) ---
+# The auto-consolidate and `radiomind learn` paths below trigger LLM calls and
+# mutate the RadioMind store / context digest in the background, without an
+# explicit foreground command. Per the authorization boundary, they are OFF by
+# default and only run when the user/host explicitly opts in. Enable via either:
+#   • ~/.claude/radioheader/config.json :  "radiomind_auto": true
+#   • environment:                         export RADIOHEADER_RADIOMIND_AUTO=1
+# When disabled, this hook is a silent no-op for these paths (no error, so it
+# never disrupts Claude Code / Codex). The pure-text Echo reminders below are
+# unaffected — they have no side effects.
+radiomind_auto_enabled() {
+  case "${RADIOHEADER_RADIOMIND_AUTO:-}" in
+    1|true|yes|on) return 0 ;;
+  esac
+  local cfg="$HOME/.claude/radioheader/config.json"
+  [ -f "$cfg" ] || return 1
+  grep -Eq '"radiomind_auto"[[:space:]]*:[[:space:]]*true' "$cfg" 2>/dev/null
+}
+
 # --- Auto-consolidate: count memory syncs, run consolidate every N ---
 CONSOLIDATE_COUNTER="$HOME/.claude/radioheader/.consolidate-counter"
 CONSOLIDATE_THRESHOLD=5
 
-if echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/\|radioheader/shortwave/"; then
+if radiomind_auto_enabled && echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/\|radioheader/shortwave/"; then
   # Increment counter
   count=0
   if [ -f "$CONSOLIDATE_COUNTER" ]; then

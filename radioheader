@@ -3835,6 +3835,7 @@ EOF
   # --- RadioMind enhanced consolidation ---
   if radiomind_available; then
     info "Using RadioMind for consolidation (dream refinement + digest)"
+    warn "This calls an LLM and mutates the RadioMind store + context digest."
     local rm_args=("rh-consolidate")
     if [ "$dry_run" = true ]; then
       rm_args+=(--dry-run)

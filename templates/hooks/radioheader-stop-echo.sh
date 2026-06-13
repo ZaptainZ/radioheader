@@ -16,6 +16,18 @@ community_enabled() {
   [ -f "$CONFIG_FILE" ] && grep -q '"community".*true' "$CONFIG_FILE" 2>/dev/null
 }
 
+# Opt-in gate for RadioMind-backed automation (deny-by-default).
+# Part 3 below auto-invokes `radiomind refine-step` on every Stop. That is an
+# automatic RadioMind call the user never asked for in the foreground, so it is
+# OFF by default. Enable via "radiomind_auto": true in config.json, or
+# export RADIOHEADER_RADIOMIND_AUTO=1. When disabled, Part 3 is a silent no-op.
+radiomind_auto_enabled() {
+  case "${RADIOHEADER_RADIOMIND_AUTO:-}" in
+    1|true|yes|on) return 0 ;;
+  esac
+  [ -f "$CONFIG_FILE" ] && grep -Eq '"radiomind_auto"[[:space:]]*:[[:space:]]*true' "$CONFIG_FILE" 2>/dev/null
+}
+
 # Part 1: Echo reminder (for configured projects)
 if [ -f "$PROJECT_DIR/.claude/rules/memory-echo.md" ]; then
   echo ""
@@ -31,11 +43,11 @@ if community_enabled && [ -d "$COMMUNITY_POOL" ]; then
   echo "📡 Community vote: If you referenced community/pool/ entries, evaluate causal contribution and append votes to ~/.claude/radioheader/pending-votes.jsonl"
 fi
 
-# Part 3: RadioMind refine-step trigger
-# When RadioMind is installed, prime a three-body debate by outputting the
-# Guardian prompt. Claude will reason about it in the next turn, and the
-# user can continue the debate with `radiomind refine-step guardian -r "..."`
-if command -v radiomind &>/dev/null; then
+# Part 3: RadioMind refine-step trigger (opt-in only)
+# When RadioMind is installed AND auto-automation is opted in, prime a three-body
+# debate by outputting the Guardian prompt. Claude will reason about it in the
+# next turn, and the user can continue with `radiomind refine-step guardian -r`.
+if radiomind_auto_enabled && command -v radiomind &>/dev/null; then
   # Pick the most recently touched domain from the session's memory writes
   RECENT_DOMAIN=""
   if [ -d "$RADIOHEADER_DIR/topics" ]; then
