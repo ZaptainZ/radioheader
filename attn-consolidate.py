@@ -237,9 +237,64 @@ def load_user_profile(rdir: str) -> dict:
     return profile
 
 
-# Budget for context-digest (chars). Claude Code truncates instruction files
-# at ~4,000 chars each. We target 3,500 to leave headroom for loader delimiters.
-MAX_DIGEST_CHARS = 3500
+# Budget for context-digest, measured in BYTES (UTF-8) to match the loader hook,
+# which gates on `wc -c` (bytes). Chinese chars are ~3 bytes each, so a char
+# count here would let the file blow past the loader's byte gate and get cut
+# mid-line at SessionStart. Target 3,500 bytes to stay under Claude Code's ~4K
+# per-file truncation and align exactly with radioheader-loader.sh.
+MAX_DIGEST_BYTES = 3500
+
+# How many domains to surface explicitly before merging the rest into a tail.
+DIGEST_TOP_DOMAINS = 8
+# How many projects to detail in 项目全景, and how many 关注/痛点 items each.
+# Keeps the digest short and focused instead of blowing the byte budget.
+DIGEST_TOP_PROJECTS = 5
+DIGEST_ITEMS_PER_PROJECT = 3
+# Recurring-error section: cap projects and patterns, drop raw snippets.
+DIGEST_TOP_ERROR_PROJECTS = 5
+DIGEST_PATTERNS_PER_PROJECT = 3
+
+
+def _byte_len(s):
+    """UTF-8 byte length — the unit the loader hook measures the digest in."""
+    return len(s.encode("utf-8"))
+
+
+def _join_top(items, limit=DIGEST_ITEMS_PER_PROJECT):
+    """Join the first `limit` list items, appending '…' when more were dropped."""
+    items = [str(x) for x in (items or [])]
+    head = ", ".join(items[:limit])
+    return head + ("…" if len(items) > limit else "")
+
+
+def summarize_active_domains(domain_index, top_n: int = DIGEST_TOP_DOMAINS):
+    """Compact active-domain overview for the digest.
+
+    Surfaces the top-N domains by project spread, then merges the long tail into
+    a single "其他 N 个低频领域" line — so the digest can never degrade into a
+    javascript:1 / totp:1 long-tail dump. Returns digest lines, or [] when there
+    is no domain data (never fabricates a section).
+
+    domain_index maps domain -> list of project names (preferred) or a raw count.
+    """
+    if not domain_index:
+        return []
+    counts = []
+    for d, v in domain_index.items():
+        c = len(v) if isinstance(v, list) else int(v or 0)
+        if c > 0:
+            counts.append((d, c))
+    if not counts:
+        return []
+    # Highest spread first; stable alphabetical tiebreak for deterministic output.
+    counts.sort(key=lambda x: (-x[1], x[0]))
+    top = counts[:top_n]
+    tail = counts[top_n:]
+    lines = ["## 活跃领域", "", "、".join(f"{d}({c})" for d, c in top)]
+    if tail:
+        lines.append(f"其他 {len(tail)} 个低频领域（略）")
+    lines.append("")
+    return lines
 
 
 def generate_context_digest(rdir: str, registry: dict, search_log: list,
@@ -282,7 +337,7 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
         "# 环境认知摘要",
         "",
         f"> 由 `radioheader consolidate` 于 {today.strftime('%Y-%m-%d')} 生成。",
-        "> 每次记忆同步时自动更新。Agent 通过此文件理解用户的整体环境。",
+        "> 前台手动运行，或 opt-in（radiomind_auto）后随记忆同步刷新。Agent 通过此文件理解用户的整体环境。",
         "",
     ]
 
@@ -307,11 +362,11 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
     # Active project landscape
     lines.append("## 项目全景")
     lines.append("")
-    for p in active[:8]:
+    for p in active[:DIGEST_TOP_PROJECTS]:
         name = p["name"]
         role = p.get("user_role", "")
-        problems = ", ".join(p.get("problems", []))
-        pain = ", ".join(p.get("pain_points", []))
+        problems = _join_top(p.get("problems", []))
+        pain = _join_top(p.get("pain_points", []))
         activity = p.get("activity", 0)
         hits = p.get("search_hits", 0)
 
@@ -338,6 +393,10 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
         if pain:
             lines.append(f"  痛点: {pain}")
     lines.append("")
+
+    # Active-domain breadth: top-N by project spread, long tail merged.
+    # Guards against the digest degrading into a per-domain count dump.
+    lines.extend(summarize_active_domains(registry.get("domain_index", {})))
 
     # Recent focus (from search log)
     if top_queries:
@@ -383,43 +442,53 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
             if proj_path:
                 project_map[proj_path.rstrip("/")] = p["name"]
 
-        for cwd, patterns in error_patterns.items():
-            # Find project name from cwd
-            proj_name = "未知项目"
+        label_map = {
+            "not-a-git-repo": "git 仓库不在此目录",
+            "file-not-found": "文件/路径不存在",
+            "command-not-found": "命令未安装",
+            "permission-denied": "权限不足",
+            "network-error": "网络连接问题",
+        }
+
+        def _proj_for(cwd):
             cwd_clean = cwd.rstrip("/")
             for proj_path, name in project_map.items():
                 if cwd_clean.startswith(proj_path) or proj_path.startswith(cwd_clean):
-                    proj_name = name
-                    break
+                    return name
+            return f"未知项目 ({os.path.basename(cwd_clean)})"
 
-            lines.append(f"**{proj_name}** (`{cwd}`):")
-            for p in patterns:
-                label_map = {
-                    "not-a-git-repo": "git 仓库不在此目录",
-                    "file-not-found": "文件/路径不存在",
-                    "command-not-found": "命令未安装",
-                    "permission-denied": "权限不足",
-                    "network-error": "网络连接问题",
-                }
-                label = label_map.get(p["pattern"], p["pattern"])
-                lines.append(f"- {label} ({p['count']} 次): `{p['snippet']}`")
-            lines.append("")
+        # Most error-prone locations first; one compact line each (label + count,
+        # no raw snippet/path) so the actionable section survives the budget.
+        ranked = sorted(
+            error_patterns.items(),
+            key=lambda kv: -sum(p.get("count", 0) for p in kv[1]),
+        )
+        for cwd, patterns in ranked[:DIGEST_TOP_ERROR_PROJECTS]:
+            top_pat = sorted(patterns, key=lambda p: -p.get("count", 0))[:DIGEST_PATTERNS_PER_PROJECT]
+            summary = "; ".join(
+                f"{label_map.get(p['pattern'], p['pattern'])}({p['count']}次)"
+                for p in top_pat
+            )
+            lines.append(f"- **{_proj_for(cwd)}**: {summary}")
+        lines.append("")
 
-    # --- Budget-aware truncation ---
+    # --- Budget-aware truncation (byte-based, matches the loader's wc -c gate) ---
     content = "\n".join(lines)
-    if len(content) > MAX_DIGEST_CHARS:
-        # Drop sections from bottom (lowest priority) until within budget
-        # Section markers: ## headers
+    marker = "\n\n> [digest truncated — budget %d bytes]" % MAX_DIGEST_BYTES
+    if _byte_len(content) > MAX_DIGEST_BYTES:
+        # Drop sections from bottom (lowest priority) until within budget.
+        # Reserve room for the marker so the final file still fits the gate.
+        limit = MAX_DIGEST_BYTES - _byte_len(marker)
         section_splits = content.split("\n## ")
         # First part is the header (always keep)
         rebuilt = section_splits[0]
         for part in section_splits[1:]:
             candidate = rebuilt + "\n## " + part
-            if len(candidate) <= MAX_DIGEST_CHARS:
+            if _byte_len(candidate) <= limit:
                 rebuilt = candidate
             else:
                 break
-        content = rebuilt.rstrip() + "\n\n> [digest truncated — budget %d chars]" % MAX_DIGEST_CHARS
+        content = rebuilt.rstrip() + marker
 
     # Write digest
     digest_path = os.path.join(rdir, "context-digest.md")
