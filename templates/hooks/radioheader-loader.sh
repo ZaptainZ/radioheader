@@ -2,6 +2,11 @@
 
 # RadioHeader: Inject cross-project experience hub context at session start.
 
+# Prepend standard user-bin dirs so `command -v radiomind` detects an install
+# even under a minimal hook PATH (e.g. Codex non-interactive shells lack ~/bin),
+# otherwise the install suggestion shows even when radiomind is present.
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+
 RADIOHEADER_DIR="$HOME/.claude/radioheader"
 
 if [ -d "$RADIOHEADER_DIR/topics" ]; then

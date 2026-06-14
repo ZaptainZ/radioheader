@@ -5,6 +5,11 @@
 #   1. Remind about Echo duties (for configured projects)
 #   2. Trigger community vote evaluation (if community enabled)
 
+# Standard user-bin dirs may be missing under a minimal hook PATH (e.g. Codex
+# non-interactive shells exclude ~/bin). Prepend so `command -v radiomind` and
+# friends resolve (radioheader→~/bin, pip tools→~/.local/bin).
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 RADIOHEADER_DIR="$HOME/.claude/radioheader"
 CONFIG_FILE="$RADIOHEADER_DIR/config.json"

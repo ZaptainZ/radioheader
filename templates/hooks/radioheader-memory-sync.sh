@@ -5,6 +5,11 @@
 # Also auto-runs `radioheader consolidate` every N memory syncs (attention weight updates).
 # Requires jq.
 
+# Standard user-bin dirs may be missing under a minimal hook PATH (e.g. Codex
+# non-interactive shells exclude ~/bin). radioheader installs to ~/bin; pip
+# tools (radiomind) land in ~/.local/bin. Prepend so `command -v` finds them.
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+
 command -v jq &>/dev/null || exit 0
 
 INPUT=$(cat)
