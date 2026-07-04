@@ -295,6 +295,20 @@ if [ "$RUNTIME" = "both" ] && [ -f "$HOME/bin/radioheader" ]; then
   ok "Removed CLI and companion scripts from ~/bin/"
 fi
 
+# Remove the PATH line install.sh may have added (only the marked block; a
+# user's own PATH lines are untouched because the marker guards the delete)
+if [ "$RUNTIME" = "both" ]; then
+  for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
+    if [ -f "$rc" ] && grep -q "# Added by RadioHeader install.sh" "$rc"; then
+      sed -i.radioheader-uninstall-bak \
+        -e '/^# Added by RadioHeader install\.sh/d' \
+        -e '/^export PATH="\$HOME\/bin:\$PATH"$/d' \
+        "$rc" && rm -f "$rc.radioheader-uninstall-bak"
+      ok "Removed RadioHeader PATH line from $rc"
+    fi
+  done
+fi
+
 echo ""
 ok "RadioHeader uninstall completed for runtime: $RUNTIME."
 echo ""

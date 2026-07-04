@@ -4,7 +4,7 @@ set -e
 # RadioHeader CLI — Cross-project experience sharing for Claude Code and Codex
 # Usage: radioheader <command> [options]
 
-VERSION="2.0.0"
+VERSION="2.0.1"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -1257,6 +1257,31 @@ cmd_doctor() {
     return 1
   fi
   echo -e "  ${GREEN}✓${NC} RadioHeader directory exists"
+
+  # CLI reachable on PATH — install.sh may fall back to ~/bin, which is not in
+  # the default PATH on macOS zsh; then every shell reports "command not found"
+  # even though the CLI is installed and healthy.
+  local cli_bin=""
+  local cli_candidate
+  for cli_candidate in /usr/local/bin/radioheader "$HOME/bin/radioheader"; do
+    if [ -x "$cli_candidate" ]; then cli_bin="$cli_candidate"; break; fi
+  done
+  if command -v radioheader >/dev/null 2>&1; then
+    echo -e "  ${GREEN}✓${NC} CLI on PATH ($(command -v radioheader))"
+  elif [ -n "$cli_bin" ]; then
+    local rc_hint
+    case "${SHELL:-}" in
+      */zsh)  rc_hint="$HOME/.zshrc" ;;
+      */bash) if [ "$(uname)" = "Darwin" ]; then rc_hint="$HOME/.bash_profile"; else rc_hint="$HOME/.bashrc"; fi ;;
+      *)      rc_hint="$HOME/.profile" ;;
+    esac
+    echo -e "  ${RED}✗${NC} CLI installed at $cli_bin but $(dirname "$cli_bin") is not in PATH"
+    echo -e "    Fix: echo 'export PATH=\"\$HOME/bin:\$PATH\"' >> $rc_hint  (then restart your shell)"
+    issues=$((issues + 1))
+  else
+    echo -e "  ${RED}✗${NC} CLI binary not found in /usr/local/bin or ~/bin — re-run install.sh"
+    issues=$((issues + 1))
+  fi
 
   if [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -q "RadioHeader START" "$CLAUDE_DIR/CLAUDE.md" 2>/dev/null; then
     claude_runtime_enabled=true

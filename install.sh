@@ -28,6 +28,16 @@ ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[RadioHeader]${NC} $1"; }
 err()   { echo -e "${RED}[RadioHeader]${NC} $1"; }
 
+# The rc file the user's interactive shell actually reads (for PATH persistence)
+detect_shell_rc() {
+  case "${SHELL:-}" in
+    */zsh)  echo "$HOME/.zshrc" ;;
+    */bash)
+      if [ "$(uname)" = "Darwin" ]; then echo "$HOME/.bash_profile"; else echo "$HOME/.bashrc"; fi ;;
+    *)      echo "$HOME/.profile" ;;
+  esac
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --runtime)
@@ -512,10 +522,36 @@ if [ -z "$CLI_INSTALLED" ]; then
   CLI_INSTALLED="$HOME/bin/radioheader"
   ok "Installed CLI → ~/bin/radioheader"
 
-  # Check if ~/bin is in PATH
-  if ! echo "$PATH" | tr ':' '\n' | grep -q "$HOME/bin"; then
-    warn "~/bin is not in your PATH. Add it with:"
-    echo "  export PATH=\"\$HOME/bin:\$PATH\""
+  # ~/bin is NOT in the default PATH on macOS zsh (and on many Linux setups only
+  # after re-login). Without fixing this, the CLI is installed but unreachable —
+  # a warn alone gets ignored once and the breakage becomes permanent.
+  if ! echo "$PATH" | tr ':' '\n' | grep -qx "$HOME/bin"; then
+    SHELL_RC="$(detect_shell_rc)"
+    if [ -f "$SHELL_RC" ] && grep -E 'PATH=' "$SHELL_RC" 2>/dev/null | grep -qE '(\$HOME|~|'"$HOME"')/bin([":]|$)'; then
+      warn "~/bin is configured in $SHELL_RC but not active in this shell."
+      echo "  Restart your shell or run: source $SHELL_RC"
+    elif [ -t 0 ]; then
+      echo ""
+      read -p "  ~/bin is not in your PATH. Add it to $SHELL_RC? (recommended) [Y/n] " -n 1 -r
+      echo
+      if [[ $REPLY =~ ^[Nn]$ ]]; then
+        warn "Skipped. The CLI won't be reachable as 'radioheader' until you add:"
+        echo "  export PATH=\"\$HOME/bin:\$PATH\""
+      else
+        {
+          echo ""
+          echo "# Added by RadioHeader install.sh — ~/bin holds the radioheader CLI"
+          echo "export PATH=\"\$HOME/bin:\$PATH\""
+        } >> "$SHELL_RC"
+        ok "Added ~/bin to PATH in $SHELL_RC (takes effect in new shells)"
+      fi
+    else
+      warn "~/bin is not in your PATH. Add it with:"
+      echo "  echo 'export PATH=\"\$HOME/bin:\$PATH\"' >> $SHELL_RC"
+      echo "  ('radioheader doctor' will keep flagging this until fixed)"
+    fi
+    # Make the CLI reachable for the remainder of this install run
+    export PATH="$HOME/bin:$PATH"
   fi
 fi
 
