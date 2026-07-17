@@ -233,6 +233,10 @@ radioheader device-sync setup
 **在身边** → AirDrop 一个一次性配对文件；**不在身边** → 口令加密的配对包走
 iCloud Drive（口令装在你脑子里，不经过任何云端）。
 
+device-sync 的全部提示与消息均为中英双语——根据系统 locale（`LANG`/`LC_ALL`）
+自动选中文，也可用 `RADIOHEADER_LANG=zh|en` 强制指定（或在
+`~/.claude/radioheader/config.json` 里设置 `"language"` 键）。
+
 手动等价命令：
 
 ```bash

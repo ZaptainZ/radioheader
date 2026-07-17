@@ -28,8 +28,9 @@ mk_home() {
   mkdir -p "$h/.claude/radioheader/topics" "$h/.claude/radioheader/shortwave" "$h/.claude/hooks"
 }
 
-# Run the CLI / hook as if on a given machine.
-rh()   { local h="$1"; shift; HOME="$h" "$CLI" "$@" < /dev/null; }
+# Run the CLI / hook as if on a given machine. UI language pinned to English
+# so output assertions are deterministic regardless of the host locale.
+rh()   { local h="$1"; shift; HOME="$h" RADIOHEADER_LANG=en "$CLI" "$@" < /dev/null; }
 hook() { local h="$1"; shift; HOME="$h" "$h/.claude/hooks/radioheader-git-sync.sh" "$@"; }
 
 echo "== machine A: init =="
@@ -127,7 +128,7 @@ else
   git init --bare --quiet "$VAULT3"
 
   # machine E simulates a different login via the test-only RH_SYNC_USER override
-  rhE()   { HOME="$HOME_E" RH_SYNC_USER=eve "$CLI" "$@" < /dev/null; }
+  rhE()   { HOME="$HOME_E" RH_SYNC_USER=eve RADIOHEADER_LANG=en "$CLI" "$@" < /dev/null; }
   hookE() { HOME="$HOME_E" RH_SYNC_USER=eve "$HOME_E/.claude/hooks/radioheader-git-sync.sh" "$@"; }
 
   mk_home "$HOME_D"
@@ -232,6 +233,13 @@ else
   check "setup without tty exits 1"      "[ $? -ne 0 ]"
   check "setup points to manual cmds"    "grep -q 'join <url>' '$WORK/setup.log'"
 fi
+
+echo "== bilingual UI (RADIOHEADER_LANG / locale detection) =="
+check "zh status has Chinese labels" "HOME='$HOME_A' RADIOHEADER_LANG=zh '$CLI' device-sync status | grep -q '多机同步状态'"
+check "zh help screen"               "HOME='$HOME_A' RADIOHEADER_LANG=zh '$CLI' device-sync --help | grep -q '工作原理'"
+check "locale zh_CN auto-detected"   "HOME='$HOME_A' RADIOHEADER_LANG= LC_ALL= LC_MESSAGES= LANG=zh_CN.UTF-8 '$CLI' device-sync status | grep -q '启用'"
+check "en output stays English"      "HOME='$HOME_A' RADIOHEADER_LANG=en '$CLI' device-sync status | grep -q 'Device Sync Status'"
+check "en output has no Chinese"     "! HOME='$HOME_A' RADIOHEADER_LANG=en '$CLI' device-sync status | grep -q '启用'"
 
 echo ""
 echo "== $PASS passed, $FAIL failed =="

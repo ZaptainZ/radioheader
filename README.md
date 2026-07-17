@@ -235,6 +235,11 @@ then pairs your other Mac: **nearby** → AirDrop a one-shot pair file;
 **not nearby** → a passphrase-encrypted bundle via iCloud Drive (the
 passphrase travels in your head, never in any cloud).
 
+All device-sync prompts and messages are bilingual — Chinese is picked
+automatically from your locale (`LANG`/`LC_ALL`), or force it with
+`RADIOHEADER_LANG=zh|en` (also settable as `"language"` in
+`~/.claude/radioheader/config.json`).
+
 Manual equivalent:
 
 ```bash
