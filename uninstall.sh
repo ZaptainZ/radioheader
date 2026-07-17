@@ -93,6 +93,7 @@ targets = {
     "radioheader-error-capture.sh",
     "radioheader-codex-userprompt.py",
     "radioheader-stop-codex.py",
+    "radioheader-git-sync.sh",
 }
 for event, groups in list(hooks.items()):
     kept = []
@@ -187,6 +188,11 @@ if [ "$RUNTIME" = "both" ]; then
     rm "$HOOKS_DIR/radioheader-stop-codex.py"
     ok "Removed radioheader-stop-codex.py"
   fi
+
+  if [ -f "$HOOKS_DIR/radioheader-git-sync.sh" ]; then
+    rm "$HOOKS_DIR/radioheader-git-sync.sh"
+    ok "Removed radioheader-git-sync.sh (sync repo in ~/.claude/radioheader is kept)"
+  fi
 else
   info "Keeping shared hook scripts in $HOOKS_DIR for the other runtime."
 fi
@@ -204,7 +210,8 @@ if claude_enabled && [ -f "$SETTINGS_JSON" ] && command -v jq &>/dev/null; then
         select(
           .hooks | all(.command | (
             contains("check-project-architecture.sh") or
-            contains("radioheader-loader.sh")
+            contains("radioheader-loader.sh") or
+            contains("radioheader-git-sync.sh")
           ) | not)
         )
       )
@@ -221,7 +228,10 @@ if claude_enabled && [ -f "$SETTINGS_JSON" ] && command -v jq &>/dev/null; then
     (if .hooks.Stop then
       .hooks.Stop |= map(
         select(
-          .hooks | all(.command | contains("radioheader-stop-echo.sh") | not)
+          .hooks | all(.command | (
+            contains("radioheader-stop-echo.sh") or
+            contains("radioheader-git-sync.sh")
+          ) | not)
         )
       )
     else . end)

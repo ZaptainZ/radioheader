@@ -213,8 +213,53 @@ radioheader doctor
 | `sync` | 同步社区库 + 上传投票 |
 | `publish <文件>` | 发布短波到社区（三关检查） |
 | `vote <id> [+1\|-1]` | 投票评价短波条目 |
-| `device-sync` | 跨设备同步（via git） |
+| `device-sync` | 多机同步（git 旁挂 + 自动 hook，可选 git-crypt 加密） |
 | `mcp-server` | 启动 MCP 服务（stdio），供 Cursor / Claude Desktop 使用 |
+
+---
+
+## 多机同步
+
+让几台 Mac 共用同一份知识库。`device-sync` 在 `~/.claude/radioheader/` 上叠一个
+git「旁挂」仓库，随 Claude 会话自动收敛：会话开始后台 pull、会话结束 push。
+
+最简单的方式——两台 Mac 各跑一次向导，按提示回答即可：
+
+```bash
+radioheader device-sync setup
+```
+
+向导会帮你创建私有 GitHub 仓库（有 `gh` 时一键建仓），然后引导另一台 Mac 接入：
+**在身边** → AirDrop 一个一次性配对文件；**不在身边** → 口令加密的配对包走
+iCloud Drive（口令装在你脑子里，不经过任何云端）。
+
+手动等价命令：
+
+```bash
+# 机器 A —— 指向一个你自己的【私有】仓库
+radioheader device-sync init --remote git@github.com:you/radioheader-vault.git
+
+# 机器 B —— 本地已有数据不会丢：与 vault 自动合并
+radioheader device-sync join git@github.com:you/radioheader-vault.git
+```
+
+追加型文件（`topics/`、`shortwave/`、`INDEX.md`）用 git union 合并——两台机器同时
+改同一个文件，双方内容都保留。真冲突永不阻塞也不丢数据：同步自动推迟，
+`device-sync status` / `doctor` 会告诉你如何解决。派生文件（`search.db`、
+`context-digest.md`、registry）保持机器本地，每次 pull 后自动重建。
+
+**项目记忆**（`~/.claude/projects/*/memory/`）可能含真实机密，只以加密形式同步——
+需显式开启：
+
+```bash
+radioheader device-sync encrypt                    # 机器 A：git-crypt 初始化
+radioheader device-sync key export                 # 密钥务必离线备份
+radioheader device-sync join <url> --key <密钥文件> # 机器 B（密钥走 SSH/AirDrop）
+```
+
+本机明文、vault 密文（`doctor` 会验证已提交 blob 的密文魔数）。密钥绝不经过
+vault 传递；删除通过墓碑标记跨机传播，删除后重建的文件获胜。随时可用
+`radioheader device-sync off` 关闭（仓库保留，可逆）。
 
 ---
 

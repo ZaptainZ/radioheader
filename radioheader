@@ -4,7 +4,7 @@ set -e
 # RadioHeader CLI — Cross-project experience sharing for Claude Code and Codex
 # Usage: radioheader <command> [options]
 
-VERSION="2.0.1"
+VERSION="2.3.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -41,15 +41,17 @@ _resolve_py3() {
 }
 RH_PY="$(_resolve_py3)"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-DIM='\033[2m'
-NC='\033[0m'
+# Colors — ANSI-C quoting ($'...') stores real escape bytes, so both
+# `echo -e` lines AND `cat <<EOF` help texts render colors (plain '\033[...]'
+# literals used to print raw escape codes in every heredoc help screen).
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+CYAN=$'\033[0;36m'
+BOLD=$'\033[1m'
+DIM=$'\033[2m'
+NC=$'\033[0m'
 
 info()  { echo -e "${BLUE}[RadioHeader]${NC} $1"; }
 ok()    { echo -e "${GREEN}[RadioHeader]${NC} $1"; }
@@ -209,7 +211,7 @@ ${BOLD}COMMANDS${NC}
   sync        Sync community shortwave library
   publish     Publish local shortwave to community (quality+privacy+dedup)
   vote        Vote on a shortwave entry (+1 or -1)
-  device-sync Sync RadioHeader data across devices via git
+  device-sync Multi-machine sync via git (init|join|now|status|off, auto hooks)
   consolidate Update project attention weights (memory consolidation)
   mcp-server  Run the RadioHeader MCP server (stdio) for MCP-compatible agents
   help        Show this help message
@@ -1651,6 +1653,78 @@ PY
     echo -e "  ${DIM}  Works alongside RadioHeader — reads the same topics/ and shortwave/ files${NC}"
   fi
 
+  # --- Device Sync (opt-in) ---
+  echo ""
+  echo -e "${BOLD}Device Sync${NC}"
+
+  if [ "$(config_get device_sync_enabled false)" = "true" ]; then
+    if [ -d "$RADIOHEADER_DIR/.git" ]; then
+      echo -e "  ${GREEN}✓${NC} Sync repository present"
+    else
+      echo -e "  ${RED}✗${NC} Enabled but no git repository — run 'radioheader device-sync init'"
+      issues=$((issues + 1))
+    fi
+    if git -C "$RADIOHEADER_DIR" remote get-url origin >/dev/null 2>&1; then
+      echo -e "  ${GREEN}✓${NC} Remote configured ($(git -C "$RADIOHEADER_DIR" remote get-url origin 2>/dev/null))"
+    else
+      echo -e "  ${RED}✗${NC} No remote — run 'radioheader device-sync init --remote <url>'"
+      issues=$((issues + 1))
+    fi
+    if [ "$(git -C "$RADIOHEADER_DIR" config pull.rebase 2>/dev/null)" = "false" ]; then
+      echo -e "  ${GREEN}✓${NC} pull.rebase=false (divergent branches merge instead of failing)"
+    else
+      echo -e "  ${YELLOW}!${NC} pull.rebase not set to false — diverged machines will never converge"
+      echo -e "    Fix: git -C $RADIOHEADER_DIR config pull.rebase false"
+      issues=$((issues + 1))
+    fi
+    if [ -x "$CLAUDE_DIR/hooks/radioheader-git-sync.sh" ]; then
+      echo -e "  ${GREEN}✓${NC} Sync hook script installed"
+    else
+      echo -e "  ${RED}✗${NC} Sync hook script missing — run 'radioheader device-sync init' to rewrite it"
+      issues=$((issues + 1))
+    fi
+    if grep -q "radioheader-git-sync.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+      echo -e "  ${GREEN}✓${NC} Auto-sync hooks registered (SessionStart pull / Stop push)"
+    else
+      echo -e "  ${YELLOW}!${NC} Hooks not registered in settings.json — run 'radioheader device-sync init'"
+      issues=$((issues + 1))
+    fi
+    if [ -f "$RADIOHEADER_DIR/.sync-diverged" ]; then
+      echo -e "  ${RED}✗${NC} Sync deferred since $(cat "$RADIOHEADER_DIR/.sync-diverged" 2>/dev/null): unresolved merge conflict"
+      echo -e "    Resolve: cd $RADIOHEADER_DIR && git pull --no-rebase  # fix conflicts, commit, push"
+      issues=$((issues + 1))
+    fi
+    if [ "$(config_get device_sync_project_memories false)" = "true" ]; then
+      if ! command -v git-crypt >/dev/null 2>&1; then
+        echo -e "  ${RED}✗${NC} Encrypted memory sync enabled but git-crypt is missing (brew install git-crypt)"
+        issues=$((issues + 1))
+      elif [ ! -f "$RADIOHEADER_DIR/.git/git-crypt/keys/default" ]; then
+        echo -e "  ${RED}✗${NC} Encrypted memory sync enabled but vault is locked — 'radioheader device-sync key import <keyfile>'"
+        issues=$((issues + 1))
+      else
+        echo -e "  ${GREEN}✓${NC} git-crypt unlocked (project memories sync encrypted)"
+      fi
+      # Ground truth: cat-file bypasses smudge/clean filters, so a committed
+      # memory file must show the GITCRYPT magic — anything else means
+      # plaintext secrets leaked into vault history.
+      local pm_sample
+      pm_sample=$(git -C "$RADIOHEADER_DIR" ls-files -- project-memories/ 2>/dev/null | grep '\.md$' | head -1)
+      if [ -n "$pm_sample" ]; then
+        if git -C "$RADIOHEADER_DIR" cat-file blob "HEAD:$pm_sample" 2>/dev/null | head -c 16 | LC_ALL=C grep -aq GITCRYPT; then
+          echo -e "  ${GREEN}✓${NC} Vault ciphertext verified (GITCRYPT magic in committed blob)"
+        else
+          echo -e "  ${RED}✗${NC} PLAINTEXT project memory found in vault history ($pm_sample)!"
+          echo -e "    Secrets may be exposed in the remote. Rotate affected credentials and"
+          echo -e "    rebuild the vault (new repo + 'device-sync encrypt' before first sync)."
+          issues=$((issues + 1))
+        fi
+      fi
+    fi
+  else
+    echo -e "  ${DIM}–${NC} Not enabled (optional — sync topics/shortwave across your machines)"
+    echo -e "  ${DIM}  Enable: radioheader device-sync init --remote <private-git-url>${NC}"
+  fi
+
   # --- Summary ---
   echo ""
   if [ "$issues" -eq 0 ]; then
@@ -2848,159 +2922,1053 @@ EOF
 # device-sync
 # ============================================================
 
+# v2: multi-machine reconcile engine (git sidecar layer).
+# Design notes: docs/multi-machine-sync-spec.md. Phase A syncs the plaintext
+# knowledge base only; encrypted project memories are Phase B.
+
+SYNC_SETTINGS_JSON="$CLAUDE_DIR/settings.json"
+SYNC_HOOK_PATH="$CLAUDE_DIR/hooks/radioheader-git-sync.sh"
+SYNC_DIVERGED_MARKER="$RADIOHEADER_DIR/.sync-diverged"
+# Visible folder on purpose: iCloud Drive is unreliable with dotfiles, and a
+# visible folder keeps the pairing bundle transparent to the user.
+SYNC_ICLOUD_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/RadioHeader"
+SYNC_PAIR_HEADER="RADIOHEADER-PAIR-V1"
+
+_sync_host_label() {
+  scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || echo machine
+}
+
+# .gitignore / .gitattributes are managed files: init/join/encrypt rewrite
+# them. With encrypted project-memory sync ON, project-memories/ is tracked
+# (git-crypt filtered) instead of ignored.
+#
+# "ON" means enabled locally OR already enabled in the vault (committed
+# .gitattributes has the filter line). The vault check is critical: a keyless
+# machine joining an encrypted vault must NOT rewrite the meta from its own
+# (false) flag — that would re-ignore project-memories/, untrack every
+# encrypted memory from the shared repo and push that deletion to everyone.
+_sync_pm_meta_on() {
+  if [ "$(config_get device_sync_project_memories false)" = "true" ]; then
+    return 0
+  fi
+  git -C "$RADIOHEADER_DIR" show HEAD:.gitattributes 2>/dev/null \
+    | grep -q 'project-memories/\*\* filter=git-crypt'
+}
+
+_sync_write_git_meta() {
+  cat > "$RADIOHEADER_DIR/.gitignore" <<'SYNCIGNORE'
+# --- Managed by `radioheader device-sync` (rewritten on init/join) ---
+
+# SQLite index — rebuilt locally (radioheader index), never synced
+search.db
+search.db-*
+
+# consolidate-derived — regenerated locally (radioheader consolidate)
+context-digest.md
+project-registry.md
+project-registry.json
+
+# community — independent git repo, each device clones separately
+community/
+
+# machine-local settings / state / logs
+config.json
+error-log.jsonl
+search-log.jsonl
+pending-votes.jsonl
+pending-publish/
+.consolidate-counter
+.radiomind-suggested
+.sync.lock
+.sync-diverged
+.sync-pm-seen
+templates/
+__pycache__/
+.DS_Store
+SYNCIGNORE
+
+  if ! _sync_pm_meta_on; then
+    cat >> "$RADIOHEADER_DIR/.gitignore" <<'SYNCIGNORE'
+
+# encrypted project memories — enable with `radioheader device-sync encrypt`
+project-memories/
+SYNCIGNORE
+  fi
+
+  # Append-mostly files get union merge: concurrent edits from two machines
+  # both survive instead of conflicting.
+  cat > "$RADIOHEADER_DIR/.gitattributes" <<'SYNCATTRS'
+# --- Managed by `radioheader device-sync` (rewritten on init/join) ---
+shortwave/*.md merge=union
+topics/*.md merge=union
+INDEX.md merge=union
+user-profile.md merge=union
+SYNCATTRS
+
+  if _sync_pm_meta_on; then
+    cat >> "$RADIOHEADER_DIR/.gitattributes" <<'SYNCATTRS'
+# project memories carry real secrets: encrypted at rest in the vault.
+# This line MUST be present before any project-memories/ file is committed.
+project-memories/** filter=git-crypt diff=git-crypt
+SYNCATTRS
+  fi
+}
+
+# The hook script is embedded here (single source of truth) so that
+# `device-sync init` is self-sufficient on installs that only upgraded the CLI.
+_sync_write_hook_script() {
+  mkdir -p "$CLAUDE_DIR/hooks"
+  cat > "$SYNC_HOOK_PATH" <<'GITSYNC_HOOK'
+#!/bin/bash
+# RadioHeader device-sync hook — reconcile the knowledge base with the vault,
+# plus (opt-in) git-crypt-encrypted project memories with tombstone deletes.
+# Managed by `radioheader device-sync init` — do not edit (init rewrites it).
+#   pull : background reconcile (SessionStart — returns instantly)
+#   push : foreground reconcile (Stop)
+# Always safe to run: exits 0 when sync is disabled, repo missing, or offline.
+export PATH="$HOME/bin:$HOME/.local/bin:$PATH"
+set +e
+RH="$HOME/.claude/radioheader"
+[ -d "$RH/.git" ] || exit 0
+grep -Eq '"device_sync_enabled"[[:space:]]*:[[:space:]]*true' "$RH/config.json" 2>/dev/null || exit 0
+
+MODE="${1:-pull}"
+# pull re-executes itself detached so the SessionStart hook returns instantly
+# instead of blocking session startup on a network round-trip.
+if [ "$MODE" = "pull" ] && [ "${RH_SYNC_BG:-}" != "1" ]; then
+  RH_SYNC_BG=1 nohup "$0" pull >/dev/null 2>&1 &
+  exit 0
+fi
+
+cd "$RH" || exit 0
+
+# Concurrency guard: atomic mkdir lock; a lock older than 3 minutes is stale
+# (killed run) and gets cleared so sync can never be wedged permanently.
+LOCK="$RH/.sync.lock"
+[ -d "$LOCK" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin +3 2>/dev/null)" ] && rmdir "$LOCK" 2>/dev/null
+mkdir "$LOCK" 2>/dev/null || exit 0
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+
+HOST="$(scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || echo machine)"
+
+# ---- encrypted project-memory channel (Phase B, quadruple-gated) ----
+# ALL of: opt-in flag, git-crypt present, repo unlocked, filter configured.
+# Any gate failing silently disables the channel — secrets can never leak as
+# plaintext into the vault, and the knowledge base still syncs normally.
+PROJECTS="$HOME/.claude/projects"
+PM="$RH/project-memories"
+SEEN="$RH/.sync-pm-seen"
+ME="${RH_SYNC_USER:-$(whoami)}"    # override is for tests only
+PM_ON=0
+if grep -Eq '"device_sync_project_memories"[[:space:]]*:[[:space:]]*true' "$RH/config.json" 2>/dev/null \
+  && command -v git-crypt >/dev/null 2>&1 \
+  && [ -f "$RH/.git/git-crypt/keys/default" ] \
+  && grep -q 'project-memories/\*\* filter=git-crypt' "$RH/.gitattributes" 2>/dev/null; then
+  PM_ON=1
+fi
+
+f_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+# staging dir key <-> local project dir: only the username segment differs
+to_local_dir() { printf '%s' "$1" | sed "s/^-HOME-/-Users-$ME-/"; }
+
+collect_pm() {
+  [ "$PM_ON" = 1 ] || return 0
+  mkdir -p "$PM"
+  local md enc key f base tomb ts
+  # 1) stage local memory files (a newer tombstone means "deleted elsewhere":
+  #    skip unless the local file was recreated/edited after the deletion)
+  for md in "$PROJECTS"/-Users-*/memory; do
+    [ -d "$md" ] || continue
+    ls "$md"/*.md >/dev/null 2>&1 || continue
+    enc="$(basename "$(dirname "$md")")"
+    key="$(printf '%s' "$enc" | sed 's/^-Users-[^-]*-/-HOME-/')"
+    mkdir -p "$PM/$key"
+    for f in "$md"/*.md; do
+      base="$(basename "$f")"
+      tomb="$PM/$key/$base.tombstone"
+      if [ -f "$tomb" ]; then
+        ts="$(cat "$tomb" 2>/dev/null | tr -cd 0-9)"
+        if [ "$(f_mtime "$f")" -gt "${ts:-0}" ] 2>/dev/null; then
+          rm -f "$tomb"
+        else
+          continue
+        fi
+      fi
+      cp -p "$f" "$PM/$key/$base" 2>/dev/null
+    done
+  done
+  # 2) local deletions -> tombstones. Only files this machine saw distributed
+  #    (.sync-pm-seen) count: absence of a never-seen file is not a deletion.
+  if [ -f "$SEEN" ]; then
+    local rel d b
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      case "$rel" in *.tombstone) continue ;; esac
+      [ -f "$PM/$rel" ] || continue
+      # parameter expansion, NOT dirname/basename: staging paths start with
+      # "-HOME-" which those tools misparse as an option
+      d="${rel%/*}"; b="${rel##*/}"
+      if [ ! -f "$PROJECTS/$(to_local_dir "$d")/memory/$b" ]; then
+        date +%s > "$PM/$rel.tombstone"
+        rm -f "$PM/$rel"
+      fi
+    done < "$SEEN"
+  fi
+  # 3) GC tombstones older than 90 days (every machine has long applied them)
+  local now t
+  now=$(date +%s)
+  find "$PM" -name '*.tombstone' -type f 2>/dev/null | while IFS= read -r t; do
+    ts="$(cat "$t" 2>/dev/null | tr -cd 0-9)"
+    [ $((now - ${ts:-0})) -gt 7776000 ] 2>/dev/null && rm -f "$t"
+  done
+}
+
+distribute_pm() {
+  [ "$PM_ON" = 1 ] || return 0
+  [ -d "$PM" ] || return 0
+  local t rel base_rel d b ld ts kd key dest f
+  # tombstones first: newer local mtime wins (recreation), else delete local
+  find "$PM" -name '*.tombstone' -type f 2>/dev/null | while IFS= read -r t; do
+    rel="${t#"$PM"/}"; base_rel="${rel%.tombstone}"
+    d="${base_rel%/*}"; b="${base_rel##*/}"
+    ld="$PROJECTS/$(to_local_dir "$d")/memory"
+    ts="$(cat "$t" 2>/dev/null | tr -cd 0-9)"
+    if [ -f "$ld/$b" ] && [ "$(f_mtime "$ld/$b")" -gt "${ts:-0}" ] 2>/dev/null; then
+      rm -f "$t"
+    else
+      rm -f "$ld/$b" "$PM/$base_rel" 2>/dev/null
+    fi
+  done
+  # staging -> local (never deletes; deletion is tombstones' job above)
+  for kd in "$PM"/-HOME-*; do
+    [ -d "$kd" ] || continue
+    key="$(basename "$kd")"
+    dest="$PROJECTS/$(to_local_dir "$key")/memory"
+    mkdir -p "$dest" 2>/dev/null
+    for f in "$kd"/*.md; do
+      [ -f "$f" ] || continue
+      cp -p "$f" "$dest/$(basename "$f")" 2>/dev/null
+    done
+  done
+  # snapshot staging so the next collect can tell deletions from never-seen
+  ( cd "$PM" 2>/dev/null && find . -name '*.md' -type f | sed 's|^\./||' ) > "$SEEN" 2>/dev/null
+}
+
+collect_pm
+git add -A 2>/dev/null
+git diff --cached --quiet 2>/dev/null || git commit -q -m "auto-sync: $HOST $(date +%Y-%m-%dT%H:%M)" 2>/dev/null
+BEFORE="$(git rev-parse HEAD 2>/dev/null)"
+if git pull --no-rebase --no-edit --autostash --quiet >/dev/null 2>&1; then
+  rm -f "$RH/.sync-diverged" 2>/dev/null
+elif [ -f "$RH/.git/MERGE_HEAD" ]; then
+  # A merge actually started and hit a real conflict (offline pulls fail
+  # without MERGE_HEAD). Keep the local commit, defer, and leave a marker so
+  # `device-sync status` / `doctor` can surface it — never lose work silently.
+  git merge --abort 2>/dev/null
+  date +%Y-%m-%dT%H:%M > "$RH/.sync-diverged" 2>/dev/null
+fi
+AFTER="$(git rev-parse HEAD 2>/dev/null)"
+git push --quiet 2>/dev/null
+distribute_pm
+if [ "$BEFORE" != "$AFTER" ] && command -v radioheader >/dev/null 2>&1; then
+  radioheader index >/dev/null 2>&1
+fi
+exit 0
+GITSYNC_HOOK
+  chmod +x "$SYNC_HOOK_PATH"
+}
+
+# Register/unregister the SessionStart+Stop entries in ~/.claude/settings.json
+# and, when the Codex compatibility layer is installed, ~/.codex/hooks.json.
+# Values cross into python via env vars to avoid shell-escaping issues.
+_sync_hooks_json() {
+  local mode="$1"
+  _sync_hooks_json_one "$mode" "$SYNC_SETTINGS_JSON" ""
+  if [ -f "$CODEX_HOOKS_JSON" ]; then
+    _sync_hooks_json_one "$mode" "$CODEX_HOOKS_JSON" "startup|resume"
+  fi
+}
+
+_sync_hooks_json_one() {
+  local mode="$1"
+  RH_SYNC_MODE="$mode" RH_SYNC_SETTINGS="$2" RH_SYNC_MATCHER="$3" \
+  RH_SYNC_TS="$(date +%Y%m%d%H%M%S)" "$RH_PY" - <<'PY'
+import json, os
+
+mode = os.environ["RH_SYNC_MODE"]
+path = os.environ["RH_SYNC_SETTINGS"]
+matcher = os.environ.get("RH_SYNC_MATCHER", "")
+ts = os.environ["RH_SYNC_TS"]
+
+data = {}
+if os.path.exists(path):
+    with open(path) as f:
+        raw = f.read()
+    with open(f"{path}.bak.{ts}", "w") as bf:
+        bf.write(raw)
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {}
+
+hooks = data.setdefault("hooks", {})
+TOKEN = "radioheader-git-sync.sh"
+
+for event in ("SessionStart", "Stop"):
+    kept = []
+    for group in hooks.get(event, []):
+        remaining = [h for h in group.get("hooks", [])
+                     if TOKEN not in h.get("command", "")]
+        if remaining:
+            group = dict(group)
+            group["hooks"] = remaining
+            kept.append(group)
+    hooks[event] = kept
+
+if mode == "register":
+    start_entry = {"hooks": [
+        {"type": "command", "command": "~/.claude/hooks/radioheader-git-sync.sh pull"}]}
+    if matcher:
+        start_entry = {"matcher": matcher, "hooks": start_entry["hooks"]}
+    hooks["SessionStart"].append(start_entry)
+    hooks["Stop"].append({"hooks": [
+        {"type": "command", "command": "~/.claude/hooks/radioheader-git-sync.sh push"}]})
+
+for event in list(hooks):
+    if not hooks[event]:
+        del hooks[event]
+if not data.get("hooks"):
+    data.pop("hooks", None)
+
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+PY
+}
+
+# Commits need an identity; machines without a global gitconfig (fresh macOS,
+# CI) get a repo-local fallback so auto-sync never dies on "empty ident".
+_sync_git_identity() {
+  if ! git -C "$RADIOHEADER_DIR" config user.email >/dev/null 2>&1; then
+    git -C "$RADIOHEADER_DIR" config user.email "radioheader-sync@local"
+  fi
+  if ! git -C "$RADIOHEADER_DIR" config user.name >/dev/null 2>&1; then
+    git -C "$RADIOHEADER_DIR" config user.name "RadioHeader Sync ($(_sync_host_label))"
+  fi
+}
+
+# Drop files that are tracked but now ignored (v1 repos tracked search.db,
+# project-registry.md, templates/ — all machine-local in v2).
+_sync_untrack_ignored() {
+  local ignored
+  ignored=$(git -C "$RADIOHEADER_DIR" ls-files -ci --exclude-standard 2>/dev/null || true)
+  if [ -n "$ignored" ]; then
+    git -C "$RADIOHEADER_DIR" ls-files -ci --exclude-standard -z 2>/dev/null \
+      | xargs -0 git -C "$RADIOHEADER_DIR" rm -q --cached -- 2>/dev/null || true
+  fi
+}
+
+_sync_enabled() {
+  [ "$(config_get device_sync_enabled false)" = "true" ]
+}
+
+# openssl with PBKDF2 is needed for the passphrase-encrypted (iCloud) bundle.
+# Homebrew OpenSSL 3.x always has it; the system LibreSSL depends on version.
+_sync_openssl_ok() {
+  printf x | openssl enc -aes-256-cbc -pbkdf2 -salt -pass pass:probe >/dev/null 2>&1
+}
+
+# Pairing bundle payload (plain form). Contains everything the second machine
+# needs except vault credentials: remote URL + (when unlocked) the git-crypt
+# key, base64-encoded. NEVER committed — travels via AirDrop or encrypted.
+_sync_pair_payload() {
+  local remote tmpk
+  remote=$(git -C "$RADIOHEADER_DIR" remote get-url origin 2>/dev/null || true)
+  printf '%s\nremote=%s\nhost=%s\ncreated=%s\n' \
+    "$SYNC_PAIR_HEADER" "$remote" "$(_sync_host_label)" "$(date +%Y-%m-%d)"
+  if [ "$(config_get device_sync_project_memories false)" = "true" ] \
+    && command -v git-crypt >/dev/null 2>&1 \
+    && [ -f "$RADIOHEADER_DIR/.git/git-crypt/keys/default" ]; then
+    tmpk=$(mktemp)
+    if (cd "$RADIOHEADER_DIR" && git-crypt export-key "$tmpk" 2>/dev/null); then
+      printf 'key_b64=%s\n' "$(openssl base64 -A < "$tmpk" 2>/dev/null || true)"
+    fi
+    rm -f "$tmpk"
+  fi
+}
+
+# Read the pairing passphrase: env override (tests / scripting) or prompt.
+# $1 = "confirm" to ask twice (export side).
+_sync_pair_passphrase() {
+  local mode="${1:-}" p1 p2
+  if [ -n "${RH_PAIR_PASSPHRASE:-}" ]; then
+    printf '%s' "$RH_PAIR_PASSPHRASE"
+    return 0
+  fi
+  if [ ! -t 0 ]; then
+    return 1
+  fi
+  read -r -s -p "  Pairing passphrase: " p1 </dev/tty; echo "" >&2
+  if [ "$mode" = "confirm" ]; then
+    read -r -s -p "  Repeat passphrase:  " p2 </dev/tty; echo "" >&2
+    if [ -z "$p1" ] || [ "$p1" != "$p2" ]; then
+      return 1
+    fi
+  fi
+  printf '%s' "$p1"
+}
+
+# Parse a .rhpair bundle (plain or passphrase-encrypted).
+# Sets PAIR_REMOTE / PAIR_HOST / PAIR_KEY_B64. Returns 1 on any failure.
+_sync_pair_read() {
+  local file="$1" head_line payload data pass
+  PAIR_REMOTE=""; PAIR_HOST=""; PAIR_KEY_B64=""
+  if [ ! -s "$file" ]; then
+    err "Pair file not found or empty: $file"
+    return 1
+  fi
+  head_line=$(head -1 "$file" 2>/dev/null | tr -d '\r\n' || true)
+  case "$head_line" in
+    "$SYNC_PAIR_HEADER")
+      payload=$(cat "$file")
+      ;;
+    "$SYNC_PAIR_HEADER-ENC")
+      if ! pass=$(_sync_pair_passphrase); then
+        err "This pair file is passphrase-protected (set RH_PAIR_PASSPHRASE or run interactively)."
+        return 1
+      fi
+      data=$(grep '^data=' "$file" 2>/dev/null | head -1 | cut -d= -f2- || true)
+      payload=$(printf '%s' "$data" | openssl base64 -d -A 2>/dev/null \
+        | RH_PAIR_PASS="$pass" openssl enc -d -aes-256-cbc -pbkdf2 -pass env:RH_PAIR_PASS 2>/dev/null || true)
+      if ! printf '%s\n' "$payload" | head -1 | grep -q "^$SYNC_PAIR_HEADER$"; then
+        err "Could not decrypt the pair file — wrong passphrase?"
+        return 1
+      fi
+      ;;
+    *)
+      err "Not a RadioHeader pair file: $file"
+      return 1
+      ;;
+  esac
+  PAIR_REMOTE=$(printf '%s\n' "$payload" | grep '^remote=' | head -1 | cut -d= -f2- || true)
+  PAIR_HOST=$(printf '%s\n' "$payload" | grep '^host=' | head -1 | cut -d= -f2- || true)
+  PAIR_KEY_B64=$(printf '%s\n' "$payload" | grep '^key_b64=' | head -1 | cut -d= -f2- || true)
+  if [ -z "$PAIR_REMOTE" ]; then
+    err "Pair file has no remote URL."
+    return 1
+  fi
+  return 0
+}
+
+# ---- interactive setup wizard (porcelain over init/join/encrypt/pair) ----
+# set -e discipline: flow control via if/case only, never `[ ] && { }`.
+
+_sync_setup_wizard() {
+  if [ ! -t 0 ]; then
+    err "setup is interactive — run it in a terminal. Non-interactive equivalents:"
+    echo "  radioheader device-sync init --remote <url>                    # first machine"
+    echo "  radioheader device-sync join <url> [--key <f>] [--pair <f>]    # other machines"
+    return 1
+  fi
+
+  echo ""
+  echo -e "${BOLD}RadioHeader Device Sync Setup${NC}"
+  echo ""
+
+  if _sync_enabled && [ -d "$RADIOHEADER_DIR/.git" ]; then
+    ok "This Mac is already syncing."
+    _sync_setup_offer_pairing
+    return 0
+  fi
+
+  echo "  1) This is my FIRST Mac — create a new sync vault"
+  echo "  2) JOIN an existing sync — another Mac already set one up"
+  local choice
+  read -r -p "  Choose [1/2]: " choice
+  case "$choice" in
+    1) _sync_setup_first ;;
+    2) _sync_setup_join ;;
+    *) err "Invalid choice."; return 1 ;;
+  esac
+}
+
+_sync_setup_first() {
+  local remote="" ans login
+  echo ""
+  echo "Sync data lives in a PRIVATE git repository that you own."
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    read -r -p "GitHub CLI is signed in — create private repo 'radioheader-vault' now? [Y/n]: " ans
+    case "$ans" in
+      n|N) ;;
+      *)
+        login=$(gh api user -q .login 2>/dev/null || true)
+        if [ -n "$login" ]; then
+          if gh repo create radioheader-vault --private >/dev/null 2>&1; then
+            ok "Created github.com/$login/radioheader-vault (private)"
+          elif gh repo view "$login/radioheader-vault" >/dev/null 2>&1; then
+            warn "Repo already exists — using it."
+          fi
+          remote="https://github.com/$login/radioheader-vault.git"
+        fi
+        ;;
+    esac
+  fi
+  if [ -z "$remote" ]; then
+    echo "  Create one in the browser (choose Private!), then paste its URL here."
+    if command -v open >/dev/null 2>&1; then
+      open "https://github.com/new?name=radioheader-vault" 2>/dev/null || true
+    fi
+    read -r -p "  Repository URL: " remote
+    if [ -z "$remote" ]; then
+      err "A repository URL is required."
+      return 1
+    fi
+  fi
+
+  if ! cmd_device_sync init --remote "$remote"; then
+    return 1
+  fi
+
+  read -r -p "Also sync project memories? (encrypted: plaintext here, ciphertext in the vault) [Y/n]: " ans
+  case "$ans" in
+    n|N) ;;
+    *)
+      if ! cmd_device_sync encrypt; then
+        return 1
+      fi
+      ;;
+  esac
+
+  _sync_setup_offer_pairing
+}
+
+_sync_setup_offer_pairing() {
+  local ans
+  echo ""
+  read -r -p "Guide your other Mac in now? [Y/n]: " ans
+  case "$ans" in
+    n|N)
+      echo "  Anytime later: radioheader device-sync pair export [--icloud]"
+      return 0
+      ;;
+  esac
+  read -r -p "Is the other Mac nearby? [1=yes → AirDrop / 2=no → iCloud + passphrase]: " ans
+  if [ "$ans" = "2" ]; then
+    if ! cmd_device_sync pair export --icloud; then
+      return 1
+    fi
+    echo ""
+    echo "  On the other Mac: radioheader device-sync setup → choose 2) JOIN → enter the passphrase."
+  else
+    if ! cmd_device_sync pair export; then
+      return 1
+    fi
+    echo ""
+    echo "  1. AirDrop ~/Desktop/radioheader-pair.rhpair to the other Mac"
+    echo "  2. There, run: radioheader device-sync setup → choose 2) JOIN"
+    echo "  3. Delete the pair file on BOTH machines afterwards (it contains the key)"
+  fi
+}
+
+_sync_setup_join() {
+  local pairfile="" ans url="" keyf=""
+  echo ""
+
+  # 1) iCloud bundle (materialize an evicted placeholder first if needed)
+  local ic="$SYNC_ICLOUD_DIR/pairing.rhpair"
+  if [ ! -s "$ic" ] && [ -e "$SYNC_ICLOUD_DIR/.pairing.rhpair.icloud" ] && command -v brctl >/dev/null 2>&1; then
+    info "Found a pairing bundle in iCloud — downloading..."
+    brctl download "$ic" >/dev/null 2>&1 || true
+    local i=0
+    while [ ! -s "$ic" ] && [ "$i" -lt 15 ]; do sleep 2; i=$((i + 1)); done
+  fi
+  if [ -s "$ic" ]; then
+    local from
+    from=$(grep '^host=' "$ic" 2>/dev/null | head -1 | cut -d= -f2- || true)
+    read -r -p "Found an iCloud pairing bundle (from ${from:-unknown}) — use it? [Y/n]: " ans
+    case "$ans" in n|N) ;; *) pairfile="$ic" ;; esac
+  fi
+
+  # 2) AirDropped pair file (lands in ~/Downloads)
+  if [ -z "$pairfile" ]; then
+    local dl
+    dl=$(ls -t "$HOME/Downloads"/*.rhpair 2>/dev/null | head -1 || true)
+    if [ -n "$dl" ]; then
+      read -r -p "Found $(basename "$dl") in Downloads — use it? [Y/n]: " ans
+      case "$ans" in n|N) ;; *) pairfile="$dl" ;; esac
+    fi
+  fi
+
+  # 3) manual fallback
+  if [ -z "$pairfile" ]; then
+    read -r -p "  Vault repository URL: " url
+    if [ -z "$url" ]; then
+      err "A repository URL is required."
+      return 1
+    fi
+    read -r -p "  git-crypt key file (leave empty if none): " keyf
+  fi
+
+  # join, retrying after the user fixes access (join prints the recipe)
+  local attempt=0 rc
+  while :; do
+    rc=0
+    if [ -n "$pairfile" ]; then
+      cmd_device_sync join --pair "$pairfile" || rc=$?
+    elif [ -n "$keyf" ]; then
+      cmd_device_sync join "$url" --key "$keyf" || rc=$?
+    else
+      cmd_device_sync join "$url" || rc=$?
+    fi
+    if [ "$rc" -eq 0 ]; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 3 ]; then
+      return "$rc"
+    fi
+    read -r -p "Fixed the issue above (e.g. signed in)? Retry [Y/n]: " ans
+    case "$ans" in n|N) return "$rc" ;; esac
+  done
+}
+
 cmd_device_sync() {
   local action="${1:-status}"
+  local host_label
+  host_label="$(_sync_host_label)"
 
   case "$action" in
     init)
-      # Initialize git repo in radioheader directory
+      # Accept: init --remote <url> | init --remote=<url> | init <url> (v1 form)
+      local remote_url=""
+      shift || true
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --remote)   remote_url="${2:-}"; shift 2 || shift ;;
+          --remote=*) remote_url="${1#--remote=}"; shift ;;
+          *)          remote_url="$1"; shift ;;
+        esac
+      done
+
+      local upgrading=false
       if [ -d "$RADIOHEADER_DIR/.git" ]; then
-        warn "Already a git repository: $RADIOHEADER_DIR"
-        echo "  Use 'radioheader device-sync push' or 'radioheader device-sync pull'"
-        return 0
+        upgrading=true
+        info "Existing repository found — upgrading it to device-sync v2."
+      else
+        git -C "$RADIOHEADER_DIR" init --quiet
       fi
 
-      # Ask for remote URL
-      local remote_url="${2:-}"
-      if [ -z "$remote_url" ]; then
-        echo ""
-        echo -e "${BOLD}Device Sync Setup${NC}"
-        echo "  This will enable syncing your RadioHeader data across devices via git."
-        echo ""
-        echo "  Create a private GitHub repo first, then paste the URL:"
-        echo "  Example: https://github.com/yourname/my-radioheader.git"
-        echo ""
-        read -p "  Remote URL: " remote_url
-        if [ -z "$remote_url" ]; then
-          err "Remote URL is required."
-          return 1
+      cd "$RADIOHEADER_DIR"
+      _sync_write_git_meta
+      _sync_git_identity
+      git config pull.rebase false
+      _sync_untrack_ignored
+
+      git add -A
+      if ! git diff --cached --quiet 2>/dev/null; then
+        if [ "$upgrading" = true ]; then
+          git commit -q -m "device-sync: upgrade sync metadata ($host_label)"
+        else
+          git commit -q -m "device-sync: initial sync ($host_label)"
         fi
       fi
 
-      # Create .gitignore
-      cat > "$RADIOHEADER_DIR/.gitignore" <<'GITIGNORE'
-# Device-specific (each device clones community separately)
-community/
-
-# Local state
-config.json
-pending-votes.jsonl
-pending-publish/
-
-# Project templates (installed by install.sh)
-templates/
-GITIGNORE
-
-      cd "$RADIOHEADER_DIR"
-      git init --quiet
-      git add -A
-      git commit -m "Initial RadioHeader sync" --quiet
+      # Remote: explicit arg > existing origin > interactive prompt.
+      if [ -z "$remote_url" ]; then
+        remote_url=$(git remote get-url origin 2>/dev/null || true)
+      fi
+      if [ -z "$remote_url" ] && [ -t 0 ]; then
+        echo ""
+        echo -e "${BOLD}Device Sync Setup${NC}"
+        echo "  Create a PRIVATE git repo first (your knowledge base will live there),"
+        echo "  then paste its URL. Example: git@github.com:you/radioheader-vault.git"
+        echo ""
+        read -p "  Remote URL: " remote_url
+      fi
+      if [ -z "$remote_url" ]; then
+        err "A remote URL is required: radioheader device-sync init --remote <url>"
+        return 1
+      fi
       git remote add origin "$remote_url" 2>/dev/null || git remote set-url origin "$remote_url"
 
-      if git push -u origin main --quiet 2>/dev/null || git push -u origin master --quiet 2>/dev/null; then
-        ok "Device sync initialized and pushed."
+      if git push -u origin HEAD --quiet 2>/dev/null; then
+        ok "Pushed to $remote_url"
       else
-        warn "Push failed — the remote may not exist yet or may already have content."
-        echo "  Try: git -C $RADIOHEADER_DIR push -u origin main"
+        warn "Initial push failed — remote may be unreachable or already have content."
+        echo "  If the remote already has a vault, this machine should join instead:"
+        echo "    radioheader device-sync join $remote_url"
+        echo "  Otherwise fix access and run: radioheader device-sync now"
       fi
 
+      _sync_write_hook_script
+      _sync_hooks_json register
+      config_set device_sync_enabled true
+
+      ok "Device sync enabled (auto: SessionStart pull / Stop push)."
       echo ""
-      echo "On your other devices, run:"
-      echo "  radioheader device-sync clone $remote_url"
+      echo "  On your other machines, run:"
+      echo "    radioheader device-sync join $remote_url"
       echo ""
       ;;
 
-    clone)
-      local remote_url="${2:-}"
+    join|clone)
+      shift || true
+      local remote_url="" keyfile="" pairfile="" pair_tmp_key=""
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --key)    keyfile="${2:-}"; shift 2 || shift ;;
+          --key=*)  keyfile="${1#--key=}"; shift ;;
+          --pair)   pairfile="${2:-}"; shift 2 || shift ;;
+          --pair=*) pairfile="${1#--pair=}"; shift ;;
+          *)        remote_url="$1"; shift ;;
+        esac
+      done
+      if [ -n "$pairfile" ]; then
+        case "$pairfile" in /*) ;; *) pairfile="$PWD/$pairfile" ;; esac
+        # If the bundle is an evicted iCloud placeholder, ask iCloud for it.
+        if [ ! -s "$pairfile" ] && command -v brctl >/dev/null 2>&1; then
+          brctl download "$pairfile" >/dev/null 2>&1 || true
+          local wait_i=0
+          while [ ! -s "$pairfile" ] && [ $wait_i -lt 15 ]; do
+            [ $wait_i -eq 0 ] && info "Waiting for iCloud to download the pair file..."
+            sleep 2; wait_i=$((wait_i + 1))
+          done
+        fi
+        if ! _sync_pair_read "$pairfile"; then
+          return 1
+        fi
+        remote_url="$PAIR_REMOTE"
+        if [ -n "$PAIR_KEY_B64" ] && [ -z "$keyfile" ]; then
+          pair_tmp_key=$(mktemp)
+          printf '%s' "$PAIR_KEY_B64" | openssl base64 -d -A > "$pair_tmp_key" 2>/dev/null || true
+          chmod 600 "$pair_tmp_key"
+          keyfile="$pair_tmp_key"
+        fi
+        if [ -n "$PAIR_HOST" ]; then
+          info "Pairing with the vault created on $PAIR_HOST"
+        fi
+      fi
       if [ -z "$remote_url" ]; then
-        err "Usage: radioheader device-sync clone <remote-url>"
+        err "Usage: radioheader device-sync join <remote-url> [--key <keyfile>] [--pair <file>]"
         return 1
       fi
-
+      if [ -n "$keyfile" ]; then
+        case "$keyfile" in /*) ;; *) keyfile="$PWD/$keyfile" ;; esac
+        if [ ! -f "$keyfile" ]; then
+          err "Key file not found: $keyfile"
+          if [ -n "$pair_tmp_key" ]; then rm -f "$pair_tmp_key"; fi
+          return 1
+        fi
+        if ! command -v git-crypt >/dev/null 2>&1; then
+          err "git-crypt is required for --key. Install: brew install git-crypt"
+          if [ -n "$pair_tmp_key" ]; then rm -f "$pair_tmp_key"; fi
+          return 1
+        fi
+      fi
       if [ -d "$RADIOHEADER_DIR/.git" ]; then
-        warn "Already a git repository. Use 'radioheader device-sync pull' instead."
+        err "Already a git repository."
+        echo "  To upgrade it:      radioheader device-sync init"
+        echo "  To sync right now:  radioheader device-sync now"
+        if [ -n "$pair_tmp_key" ]; then rm -f "$pair_tmp_key"; fi
         return 1
       fi
 
-      # Backup existing data
+      # Full safety net before touching anything.
       if [ -d "$RADIOHEADER_DIR/topics" ] || [ -d "$RADIOHEADER_DIR/shortwave" ]; then
         local backup_dir="$RADIOHEADER_DIR.backup.$(date +%Y%m%d%H%M%S)"
         warn "Backing up existing data to $backup_dir"
         cp -R "$RADIOHEADER_DIR" "$backup_dir"
       fi
 
-      # Save local config before clone overwrites
-      local saved_config=""
-      if [ -f "$CONFIG_FILE" ]; then
-        saved_config=$(cat "$CONFIG_FILE")
-      fi
-
-      # Clone into temp, then move
       local tmp_dir
       tmp_dir=$(mktemp -d)
-      if git clone --quiet "$remote_url" "$tmp_dir" 2>/dev/null; then
-        # Move git data into radioheader dir
-        rm -rf "$RADIOHEADER_DIR/.git"
-        mv "$tmp_dir/.git" "$RADIOHEADER_DIR/.git"
-        git -C "$RADIOHEADER_DIR" checkout -- . 2>/dev/null
-        rm -rf "$tmp_dir"
-
-        # Restore local config
-        if [ -n "$saved_config" ]; then
-          echo "$saved_config" > "$CONFIG_FILE"
+      if ! git clone --quiet "$remote_url" "$tmp_dir/vault" 2>"$tmp_dir/clone-err"; then
+        # Tell the user WHY — for ordinary users "auth failed" needs a recipe,
+        # not a generic clone error.
+        if grep -qiE "permission denied|authentication|could not read Username|access rights|403" "$tmp_dir/clone-err" 2>/dev/null; then
+          err "Clone failed: this Mac has no access to $remote_url"
+          if command -v gh >/dev/null 2>&1; then
+            echo "  Easiest fix:  gh auth login    (sign in via browser), then retry."
+          fi
+          echo "  Or add this Mac's SSH key to your GitHub account:"
+          echo "    ssh-keygen -t ed25519             # if you don't have one yet"
+          echo "    pbcopy < ~/.ssh/id_ed25519.pub    # copies the public key"
+          echo "    open https://github.com/settings/ssh/new   # paste & save"
+        elif grep -qiE "not found|does not exist|does not appear to be" "$tmp_dir/clone-err" 2>/dev/null; then
+          err "Clone failed: repository not found — double-check the URL: $remote_url"
+        else
+          err "Failed to clone $remote_url"
+          sed 's/^/    /' "$tmp_dir/clone-err" 2>/dev/null | head -3
         fi
-
-        ok "Device sync cloned. Your topics/ and shortwave/ are now synced."
-      else
-        err "Failed to clone from $remote_url"
         rm -rf "$tmp_dir"
+        if [ -n "$pair_tmp_key" ]; then rm -f "$pair_tmp_key"; fi
         return 1
       fi
-      ;;
-
-    push)
-      if [ ! -d "$RADIOHEADER_DIR/.git" ]; then
-        err "Not a git repository. Run 'radioheader device-sync init' first."
-        return 1
+      # Unlock in the pristine temp clone (clean worktree, so git-crypt never
+      # refuses); the key and filter config live in .git/ and travel with it.
+      if [ -n "$keyfile" ]; then
+        if ! (cd "$tmp_dir/vault" && git-crypt unlock "$keyfile" >/dev/null 2>&1); then
+          err "git-crypt unlock failed — wrong key file for this vault?"
+          rm -rf "$tmp_dir"
+          if [ -n "$pair_tmp_key" ]; then rm -f "$pair_tmp_key"; fi
+          return 1
+        fi
       fi
+      mv "$tmp_dir/vault/.git" "$RADIOHEADER_DIR/.git"
+      rm -rf "$tmp_dir"
 
       cd "$RADIOHEADER_DIR"
+      git config pull.rebase false
+      _sync_git_identity
+
+      # Adopt, don't overwrite: files that exist only in the vault are checked
+      # out; files that also exist locally keep the LOCAL version (committed on
+      # top — the vault's copy stays in history).
+      local missing
+      missing=$(git ls-files -d 2>/dev/null || true)
+      if [ -n "$missing" ]; then
+        git ls-files -d -z 2>/dev/null | xargs -0 git checkout -q -- 2>/dev/null || true
+      fi
+
+      if [ -n "$keyfile" ]; then
+        config_set device_sync_project_memories true
+      fi
+      _sync_write_git_meta
+      _sync_untrack_ignored
       git add -A
-      if git diff --cached --quiet 2>/dev/null; then
-        ok "Nothing to push. Already up to date."
-        return 0
+      if ! git diff --cached --quiet 2>/dev/null; then
+        git commit -q -m "device-sync: join ($host_label)"
+      fi
+      if ! git pull --no-rebase --no-edit --autostash --quiet 2>/dev/null; then
+        if [ -f "$RADIOHEADER_DIR/.git/MERGE_HEAD" ]; then
+          git merge --abort 2>/dev/null || true
+          warn "Merge conflict with the vault — local state kept, sync deferred."
+        fi
+      fi
+      git push --quiet 2>/dev/null || warn "Push failed — will retry on next sync."
+
+      _sync_write_hook_script
+      _sync_hooks_json register
+      config_set device_sync_enabled true
+
+      # One foreground reconcile so encrypted project memories (if --key)
+      # land in ~/.claude/projects/*/memory/ right away.
+      RH_SYNC_BG=1 "$SYNC_HOOK_PATH" push >/dev/null 2>&1 || true
+
+      cmd_index >/dev/null 2>&1 || true
+      ok "Joined vault. Search index rebuilt; run 'radioheader consolidate' to refresh the digest."
+      if [ -n "$keyfile" ]; then
+        ok "Encrypted project memories unlocked and distributed."
+        if [ -n "$pair_tmp_key" ]; then
+          echo -e "  ${YELLOW}Back up the key offline now${NC}: radioheader device-sync key export"
+        else
+          echo -e "  ${YELLOW}Keep an offline backup of the key file${NC} — losing it makes the vault's ciphertext unrecoverable."
+        fi
+      fi
+      if [ -n "$pair_tmp_key" ]; then rm -f "$pair_tmp_key"; fi
+      case "$pairfile" in
+        "$SYNC_ICLOUD_DIR"/*)
+          rm -f "$pairfile" 2>/dev/null || true
+          info "Pairing bundle removed from iCloud (single-use)."
+          ;;
+      esac
+      ;;
+
+    encrypt)
+      if ! _sync_enabled || [ ! -d "$RADIOHEADER_DIR/.git" ]; then
+        err "Device sync is not set up yet. Run 'radioheader device-sync init' first."
+        return 1
+      fi
+      if ! command -v git-crypt >/dev/null 2>&1; then
+        err "git-crypt is required for encrypted project-memory sync."
+        echo "  Install: brew install git-crypt"
+        return 1
+      fi
+      cd "$RADIOHEADER_DIR"
+      if [ ! -f .git/git-crypt/keys/default ]; then
+        # Wrong-key guard: if the vault already holds ciphertext, generating a
+        # NEW key here could never decrypt it — the key must come from an
+        # already-unlocked machine instead.
+        if git ls-files -- project-memories/ 2>/dev/null | grep -q .; then
+          err "The vault already contains encrypted project memories."
+          echo "  Copy the key from an unlocked machine (via SSH/AirDrop — never through the vault):"
+          echo "    other machine:  radioheader device-sync key export"
+          echo "    this machine:   radioheader device-sync key import <keyfile>"
+          return 1
+        fi
+        if ! git-crypt init >/dev/null 2>&1; then
+          err "git-crypt init failed."
+          return 1
+        fi
+      fi
+      config_set device_sync_project_memories true
+      _sync_write_git_meta
+      _sync_write_hook_script
+      git add -A
+      git diff --cached --quiet 2>/dev/null || git commit -q -m "device-sync: enable encrypted project-memory sync ($host_label)"
+      git push --quiet 2>/dev/null || true
+
+      ok "Encrypted project-memory sync enabled (staged under project-memories/, ciphertext in the vault)."
+      echo ""
+      echo -e "  ${YELLOW}⚠ BACK UP THE KEY NOW${NC} — losing it makes the vault's ciphertext unrecoverable:"
+      echo "    radioheader device-sync key export    # store offline (e.g. password manager)"
+      echo ""
+      echo "  Other machines:  radioheader device-sync key import <keyfile>   (transfer the key"
+      echo "  out-of-band: SSH/AirDrop — never commit it or send it through the vault)"
+      echo "  First sync:      radioheader device-sync now"
+      ;;
+
+    key)
+      local sub="${2:-}"
+      case "$sub" in
+        export)
+          local out="${3:-$HOME/radioheader-vault.key}"
+          case "$out" in /*) ;; *) out="$PWD/$out" ;; esac
+          command -v git-crypt >/dev/null 2>&1 || { err "git-crypt is not installed."; return 1; }
+          if [ ! -f "$RADIOHEADER_DIR/.git/git-crypt/keys/default" ]; then
+            err "This machine is not unlocked — nothing to export."
+            echo "  Run 'radioheader device-sync encrypt' (first machine) or 'key import' first."
+            return 1
+          fi
+          if (cd "$RADIOHEADER_DIR" && git-crypt export-key "$out" 2>/dev/null); then
+            chmod 600 "$out"
+            ok "Key exported to $out"
+            echo -e "  ${YELLOW}Handle with care:${NC} transfer out-of-band only (SSH/AirDrop), keep an"
+            echo "  offline backup, never commit it — losing every copy means the vault's"
+            echo "  encrypted project memories are gone forever."
+          else
+            err "Key export failed."
+            return 1
+          fi
+          ;;
+        import)
+          local keyfile="${3:-}"
+          if [ -z "$keyfile" ] || [ ! -f "$keyfile" ]; then
+            err "Usage: radioheader device-sync key import <keyfile>"
+            return 1
+          fi
+          case "$keyfile" in /*) ;; *) keyfile="$PWD/$keyfile" ;; esac
+          command -v git-crypt >/dev/null 2>&1 || { err "git-crypt is not installed. Install: brew install git-crypt"; return 1; }
+          if [ ! -d "$RADIOHEADER_DIR/.git" ]; then
+            err "No sync repository. Run 'device-sync init' or 'device-sync join <url> --key <keyfile>' instead."
+            return 1
+          fi
+          if (cd "$RADIOHEADER_DIR" && git-crypt unlock "$keyfile" >/dev/null 2>&1); then
+            config_set device_sync_project_memories true
+            _sync_write_git_meta
+            _sync_write_hook_script
+            ok "Vault unlocked — encrypted project-memory sync enabled on this machine."
+            echo "  Run 'radioheader device-sync now' to distribute memories locally."
+          else
+            err "git-crypt unlock failed — wrong key, or uncommitted local changes."
+            echo "  Try 'radioheader device-sync now' first (commits pending changes), then re-import."
+            return 1
+          fi
+          ;;
+        *)
+          err "Usage: radioheader device-sync key [export [file] | import <file>]"
+          return 1
+          ;;
+      esac
+      ;;
+
+    pair)
+      local sub="${2:-export}"
+      if [ "$sub" != "export" ]; then
+        err "Usage: radioheader device-sync pair export [--icloud | --file <path>]"
+        return 1
+      fi
+      if ! _sync_enabled || [ ! -d "$RADIOHEADER_DIR/.git" ]; then
+        err "Device sync is not set up yet. Run 'radioheader device-sync init' first."
+        return 1
+      fi
+      if ! git -C "$RADIOHEADER_DIR" remote get-url origin >/dev/null 2>&1; then
+        err "No remote configured — run 'radioheader device-sync init --remote <url>' first."
+        return 1
       fi
 
-      git commit -m "Sync RadioHeader ($(date '+%Y-%m-%d %H:%M'))" --quiet
-      if git push --quiet 2>/dev/null; then
-        ok "Pushed to remote."
+      shift 2 || true
+      local pair_mode="file" pair_out="$HOME/Desktop/radioheader-pair.rhpair"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --icloud)  pair_mode="icloud"; shift ;;
+          --file)    pair_out="${2:-}"; shift 2 || shift ;;
+          --file=*)  pair_out="${1#--file=}"; shift ;;
+          *)         err "Unknown option: $1"; return 1 ;;
+        esac
+      done
+
+      if [ "$pair_mode" = "icloud" ]; then
+        if ! _sync_openssl_ok; then
+          err "This machine's openssl lacks -pbkdf2 (needed to encrypt the bundle)."
+          echo "  Install a modern one: brew install openssl"
+          return 1
+        fi
+        local pass
+        if ! pass=$(_sync_pair_passphrase confirm); then
+          err "Passphrases empty or did not match."
+          return 1
+        fi
+        mkdir -p "$SYNC_ICLOUD_DIR"
+        local pair_enc
+        pair_enc=$(_sync_pair_payload | RH_PAIR_PASS="$pass" openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:RH_PAIR_PASS 2>/dev/null | openssl base64 -A || true)
+        if [ -z "$pair_enc" ]; then
+          err "Failed to encrypt the pairing bundle."
+          return 1
+        fi
+        {
+          printf '%s-ENC\n' "$SYNC_PAIR_HEADER"
+          printf 'host=%s\ncreated=%s\n' "$(_sync_host_label)" "$(date +%Y-%m-%d)"
+          printf 'data=%s\n' "$pair_enc"
+        } > "$SYNC_ICLOUD_DIR/pairing.rhpair"
+        chmod 600 "$SYNC_ICLOUD_DIR/pairing.rhpair"
+        ok "Encrypted pairing bundle written to iCloud Drive/RadioHeader/pairing.rhpair"
+        echo "  On the other Mac (once iCloud syncs):"
+        echo "    radioheader device-sync setup    → choose \"join\", enter the passphrase"
+        echo "  The bundle is single-use: it is deleted automatically after a successful join."
       else
-        warn "Push failed. Try: git -C $RADIOHEADER_DIR push"
+        case "$pair_out" in /*) ;; *) pair_out="$PWD/$pair_out" ;; esac
+        mkdir -p "$(dirname "$pair_out")"
+        _sync_pair_payload > "$pair_out"
+        chmod 600 "$pair_out"
+        ok "Pair file written: $pair_out"
+        if grep -q '^key_b64=' "$pair_out" 2>/dev/null; then
+          echo -e "  ${YELLOW}It contains the vault URL AND the encryption key${NC} — AirDrop it to your"
+          echo "  other Mac, then DELETE it on both machines once joined."
+        else
+          echo "  It contains the vault URL (no encryption key). AirDrop it to your other Mac."
+        fi
+        echo "  On the other Mac:  radioheader device-sync setup   (or: device-sync join --pair <file>)"
       fi
       ;;
 
-    pull)
+    setup)
+      _sync_setup_wizard
+      ;;
+
+    now|push|pull)
+      if ! _sync_enabled; then
+        err "Device sync is not enabled. Run 'radioheader device-sync init' first."
+        return 1
+      fi
       if [ ! -d "$RADIOHEADER_DIR/.git" ]; then
         err "Not a git repository. Run 'radioheader device-sync init' first."
         return 1
       fi
+      # Self-heal: rewrite the hook script if missing (e.g. hooks dir cleaned).
+      [ -x "$SYNC_HOOK_PATH" ] || _sync_write_hook_script
 
-      cd "$RADIOHEADER_DIR"
-      # Stash local changes
-      local has_changes=false
-      if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
-        has_changes=true
-        git stash --quiet 2>/dev/null
-      fi
+      info "Reconciling with remote..."
+      "$SYNC_HOOK_PATH" push || true
 
-      if git pull --rebase --quiet 2>/dev/null; then
-        ok "Pulled latest from remote."
+      if [ -f "$SYNC_DIVERGED_MARKER" ]; then
+        warn "Sync deferred: real merge conflict with remote (local changes kept)."
+        echo "  Resolve manually:"
+        echo "    cd $RADIOHEADER_DIR && git pull --no-rebase   # fix conflicts"
+        echo "    git add -A && git commit && git push"
       else
-        warn "Pull failed. You may need to resolve conflicts manually."
-      fi
-
-      if [ "$has_changes" = true ]; then
-        git stash pop --quiet 2>/dev/null || warn "Stash pop had conflicts. Check git status."
+        ok "Sync complete."
       fi
       ;;
 
@@ -3008,69 +3976,150 @@ GITIGNORE
       echo ""
       echo -e "${BOLD}Device Sync Status${NC}"
       echo ""
-      if [ -d "$RADIOHEADER_DIR/.git" ]; then
-        echo -e "  Git:      ${GREEN}initialized${NC}"
-        local remote
-        remote=$(git -C "$RADIOHEADER_DIR" remote get-url origin 2>/dev/null || echo "none")
-        echo -e "  Remote:   ${CYAN}$remote${NC}"
-        local branch
-        branch=$(git -C "$RADIOHEADER_DIR" branch --show-current 2>/dev/null || echo "unknown")
-        echo -e "  Branch:   $branch"
-        local status_msg
-        if git -C "$RADIOHEADER_DIR" diff --quiet 2>/dev/null && git -C "$RADIOHEADER_DIR" diff --cached --quiet 2>/dev/null; then
-          status_msg="${GREEN}clean${NC}"
-        else
-          local changed
-          changed=$(git -C "$RADIOHEADER_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-          status_msg="${YELLOW}$changed file(s) changed${NC}"
-        fi
-        echo -e "  Status:   $status_msg"
+      if _sync_enabled; then
+        echo -e "  Enabled:  ${GREEN}yes${NC}"
       else
+        echo -e "  Enabled:  ${DIM}no${NC} (radioheader device-sync init)"
+      fi
+
+      if [ ! -d "$RADIOHEADER_DIR/.git" ]; then
         echo -e "  Git:      ${DIM}not initialized${NC}"
         echo ""
-        echo "  Set up with: radioheader device-sync init <remote-url>"
+        echo "  Set up with: radioheader device-sync init --remote <url>"
+        echo ""
+        return 0
+      fi
+
+      echo -e "  Git:      ${GREEN}initialized${NC}"
+      local remote branch
+      remote=$(git -C "$RADIOHEADER_DIR" remote get-url origin 2>/dev/null || echo "none")
+      branch=$(git -C "$RADIOHEADER_DIR" branch --show-current 2>/dev/null || echo "unknown")
+      echo -e "  Remote:   ${CYAN}$remote${NC}"
+      echo -e "  Branch:   $branch"
+
+      local counts behind ahead
+      counts=$(git -C "$RADIOHEADER_DIR" rev-list --left-right --count '@{u}...HEAD' 2>/dev/null || true)
+      if [ -n "$counts" ]; then
+        behind=$(echo "$counts" | awk '{print $1}')
+        ahead=$(echo "$counts" | awk '{print $2}')
+        echo -e "  Upstream: ${YELLOW}$ahead${NC} to push, ${YELLOW}$behind${NC} to pull (as of last fetch)"
+      else
+        echo -e "  Upstream: ${DIM}not set${NC}"
+      fi
+
+      local changed
+      changed=$(git -C "$RADIOHEADER_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+      if [ "$changed" = "0" ]; then
+        echo -e "  Worktree: ${GREEN}clean${NC}"
+      else
+        echo -e "  Worktree: ${YELLOW}$changed file(s) pending${NC} (picked up by next sync)"
+      fi
+
+      if grep -q "radioheader-git-sync.sh" "$SYNC_SETTINGS_JSON" 2>/dev/null; then
+        echo -e "  Hooks:    ${GREEN}registered${NC} (SessionStart pull / Stop push)"
+      else
+        echo -e "  Hooks:    ${DIM}not registered${NC}"
+      fi
+
+      if [ "$(config_get device_sync_project_memories false)" = "true" ]; then
+        if command -v git-crypt >/dev/null 2>&1 && [ -f "$RADIOHEADER_DIR/.git/git-crypt/keys/default" ]; then
+          local pm_count tomb_count
+          pm_count=$(find "$RADIOHEADER_DIR/project-memories" -name '*.md' -type f 2>/dev/null | wc -l | tr -d ' ')
+          tomb_count=$(find "$RADIOHEADER_DIR/project-memories" -name '*.tombstone' -type f 2>/dev/null | wc -l | tr -d ' ')
+          echo -e "  Memories: ${GREEN}encrypted sync on${NC} ($pm_count staged, $tomb_count tombstone(s))"
+        else
+          echo -e "  Memories: ${RED}enabled but locked${NC} — radioheader device-sync key import <keyfile>"
+        fi
+      else
+        echo -e "  Memories: ${DIM}not synced${NC} (enable: radioheader device-sync encrypt)"
+      fi
+
+      if [ -f "$SYNC_DIVERGED_MARKER" ]; then
+        echo ""
+        echo -e "  ${RED}⚠ Sync deferred since $(cat "$SYNC_DIVERGED_MARKER" 2>/dev/null): real merge conflict.${NC}"
+        echo "    Resolve: cd $RADIOHEADER_DIR && git pull --no-rebase  # fix, commit, push"
+      fi
+      if [ -d "$RADIOHEADER_DIR/.sync.lock" ]; then
+        echo -e "  ${DIM}(a sync appears to be running right now)${NC}"
       fi
       echo ""
       ;;
 
+    off)
+      _sync_hooks_json unregister
+      config_set device_sync_enabled false
+      ok "Auto-sync disabled. Repository kept at $RADIOHEADER_DIR."
+      echo "  Re-enable anytime with: radioheader device-sync init"
+      ;;
+
     --help|-h)
       cat <<EOF
-${BOLD}radioheader device-sync${NC} — Sync RadioHeader data across devices via git
+${BOLD}radioheader device-sync${NC} — Multi-machine sync of your RadioHeader data via git
 
 ${BOLD}USAGE${NC}
-  radioheader device-sync [init|clone|push|pull|status]
+  radioheader device-sync [setup|init|join|encrypt|key|pair|now|status|off]
 
 ${BOLD}ACTIONS${NC}
-  init <url>     Initialize git in ~/.claude/radioheader/ and push to remote
-  clone <url>    Clone remote into existing radioheader directory
-  push           Commit and push local changes
-  pull           Pull latest from remote (stashes local changes)
-  status         Show sync status (default)
+  setup                  Interactive wizard — start here. Walks through first
+                         machine / joining, repo creation, encryption, pairing
+  init [--remote <url>]  Enable sync on this machine (creates/upgrades the git
+                         repo in ~/.claude/radioheader/, installs auto-sync hooks)
+  join <url> [--key <f>] First sync on an additional machine: adopt the remote
+  join --pair <file>     vault, merge local data in (nothing is lost); --key
+                         unlocks encrypted memories, --pair uses a pair bundle
+  encrypt                Also sync ~/.claude/projects/*/memory/ — encrypted with
+                         git-crypt (plaintext locally, ciphertext in the vault)
+  key export [file]      Export the symmetric key (default ~/radioheader-vault.key)
+  key import <file>      Unlock this machine with a key from another machine
+  pair export            Pair bundle (URL + key) for the second Mac, to
+                         ~/Desktop for AirDrop; --icloud writes a passphrase-
+                         encrypted bundle to iCloud Drive/RadioHeader/ instead
+  now                    Reconcile right now (also: push / pull — same thing)
+  status                 Show sync health (default)
+  off                    Disable auto-sync hooks (repo is kept; reversible)
+
+${BOLD}HOW IT WORKS${NC}
+  A git "sidecar" repo inside ~/.claude/radioheader/. Auto-sync runs on Claude
+  session start (background pull) and session stop (push). Append-mostly files
+  (topics/, shortwave/, INDEX.md) merge with union — two machines editing the
+  same file both survive. Real conflicts never block: local wins, sync defers,
+  'status' tells you. Project memories are staged under project-memories/ with
+  usernames normalized (machines don't need the same login) and deletions
+  propagate via tombstones — a file recreated after deletion wins.
 
 ${BOLD}WHAT SYNCS${NC}
-  ✓ topics/          — your experience entries
-  ✓ shortwave/       — refined knowledge units
-  ✓ INDEX.md         — master index
-  ✓ project-registry.md
+  ✓ topics/  shortwave/  INDEX.md  user-profile.md
+  ✓ project memories (opt-in via 'encrypt' — never plaintext in the vault)
 
-${BOLD}WHAT DOESN'T SYNC${NC}
-  ✗ community/       — each device clones separately
-  ✗ config.json      — device-specific settings
-  ✗ pending-votes    — local state
-  ✗ templates/       — installed by install.sh
+${BOLD}WHAT STAYS LOCAL${NC} (rebuilt per machine)
+  ✗ search.db (radioheader index)   ✗ context-digest.md / project-registry.*
+  ✗ community/ (own clone)          ✗ config.json, logs, counters
+
+${BOLD}SECURITY${NC}
+  The git-crypt key travels out-of-band only (SSH/AirDrop), never through the
+  vault. Keep an offline backup — losing every copy of the key makes the
+  vault's ciphertext permanently unrecoverable. If any gate is off (no key,
+  git-crypt missing), memory sync silently stays off; knowledge still syncs.
 
 ${BOLD}SETUP${NC}
-  1. Create a private GitHub repo (e.g. my-radioheader)
-  2. On Device A:  radioheader device-sync init https://github.com/you/my-radioheader.git
-  3. On Device B:  radioheader device-sync clone https://github.com/you/my-radioheader.git
-  4. Regular use:  radioheader device-sync push / pull
+  Easiest: run ${BOLD}radioheader device-sync setup${NC} on the first Mac, answer the
+  prompts (it can create the GitHub repo for you), then run the same command
+  on the other Mac. Nearby Macs pair via an AirDropped file; distant Macs via
+  a passphrase-encrypted bundle in iCloud Drive.
+
+  Manual equivalent:
+  1. Create a PRIVATE repo (e.g. github.com/you/radioheader-vault)
+  2. Machine A:  radioheader device-sync init --remote <url>
+                 radioheader device-sync encrypt && radioheader device-sync pair export
+  3. Machine B:  radioheader device-sync join --pair <airdropped-file>
+  4. Done — syncs automatically with each Claude session.
 
 EOF
       ;;
 
     *)
       err "Unknown action: $action"
-      echo "Usage: radioheader device-sync [init|clone|push|pull|status]"
+      echo "Usage: radioheader device-sync [setup|init|join|encrypt|key|pair|now|status|off]"
       return 1
       ;;
   esac

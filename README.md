@@ -213,8 +213,58 @@ radioheader doctor
 | `sync` | Pull community library + push votes |
 | `publish <file>` | Publish shortwave to community (3-gate check) |
 | `vote <id> [+1\|-1]` | Vote on a shortwave entry |
-| `device-sync` | Cross-device sync via git |
+| `device-sync` | Multi-machine sync via git (auto hooks, optional git-crypt) |
 | `mcp-server` | Run MCP server (stdio) for Cursor, Claude Desktop |
+
+---
+
+## Multi-machine sync
+
+Keep the same knowledge base on all your Macs. `device-sync` overlays a git
+"sidecar" repo on `~/.claude/radioheader/` and reconciles automatically on
+Claude session start (background pull) and stop (push).
+
+Easiest path — run the wizard on each Mac and answer the prompts:
+
+```bash
+radioheader device-sync setup
+```
+
+It creates the private GitHub repo for you (via `gh`) or walks you through it,
+then pairs your other Mac: **nearby** → AirDrop a one-shot pair file;
+**not nearby** → a passphrase-encrypted bundle via iCloud Drive (the
+passphrase travels in your head, never in any cloud).
+
+Manual equivalent:
+
+```bash
+# machine A — point at a PRIVATE repo you own
+radioheader device-sync init --remote git@github.com:you/radioheader-vault.git
+
+# machine B — nothing is lost: local entries merge with the vault
+radioheader device-sync join git@github.com:you/radioheader-vault.git
+```
+
+Append-mostly files (`topics/`, `shortwave/`, `INDEX.md`) merge with git's
+union driver, so two machines editing the same file both survive. Real
+conflicts never block or lose work — the sync defers and `device-sync status` /
+`doctor` tell you how to resolve. Derived files (`search.db`,
+`context-digest.md`, registries) stay machine-local and are rebuilt after each
+pull.
+
+**Project memories** (`~/.claude/projects/*/memory/`) can hold real secrets, so
+they only sync encrypted — opt-in:
+
+```bash
+radioheader device-sync encrypt                    # machine A: git-crypt setup
+radioheader device-sync key export                 # back up the key OFFLINE
+radioheader device-sync join <url> --key <keyfile> # machine B (key via SSH/AirDrop)
+```
+
+Plaintext on your machines, ciphertext in the vault (`doctor` verifies the
+committed blobs). The key never travels through the vault; deletions propagate
+via tombstones, and a file recreated after deletion wins. Disable anytime with
+`radioheader device-sync off` (the repo is kept).
 
 ---
 
