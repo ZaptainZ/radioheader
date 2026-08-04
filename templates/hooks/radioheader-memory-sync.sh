@@ -16,10 +16,12 @@ INPUT=$(cat)
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 
 # --- Opt-in gate: RadioMind-backed background automation (deny-by-default) ---
-# The auto-consolidate and `radiomind learn` paths below trigger LLM calls and
-# mutate the RadioMind store / context digest in the background, without an
-# explicit foreground command. Per the authorization boundary, they are OFF by
-# default and only run when the user/host explicitly opts in. Enable via either:
+# The RadioMind-delegating consolidate and `radiomind learn` paths below
+# trigger LLM calls and mutate the RadioMind store in the background, without
+# an explicit foreground command. Per the authorization boundary, they are OFF
+# by default and only run when the user/host explicitly opts in. (The purely
+# local digest refresh is governed separately by auto_digest below — it never
+# touches RadioMind.) Enable via either:
 #   • ~/.claude/radioheader/config.json :  "radiomind_auto": true
 #   • environment:                         export RADIOHEADER_RADIOMIND_AUTO=1
 # When disabled, this hook is a silent no-op for these paths (no error, so it
@@ -34,11 +36,27 @@ radiomind_auto_enabled() {
   grep -Eq '"radiomind_auto"[[:space:]]*:[[:space:]]*true' "$cfg" 2>/dev/null
 }
 
+# --- Native digest scope: auto_digest (independent of the RadioMind gate) ---
+# Controls only the pure-local refresh of derived files (project-registry /
+# context-digest) via `radioheader consolidate --native` — no RadioMind, no
+# LLM, no network. Default ON. Disable via either:
+#   • ~/.claude/radioheader/config.json :  "auto_digest": false
+#   • environment:                         RADIOHEADER_AUTO_DIGEST=0
+auto_digest_enabled() {
+  case "${RADIOHEADER_AUTO_DIGEST:-}" in
+    0|false|no|off) return 1 ;;
+  esac
+  local cfg="$HOME/.claude/radioheader/config.json"
+  [ -f "$cfg" ] || return 0
+  ! grep -Eq '"auto_digest"[[:space:]]*:[[:space:]]*false' "$cfg" 2>/dev/null
+}
+
 # --- Auto-consolidate: count memory syncs, run consolidate every N ---
 CONSOLIDATE_COUNTER="$HOME/.claude/radioheader/.consolidate-counter"
 CONSOLIDATE_THRESHOLD=5
 
-if radiomind_auto_enabled && echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/\|radioheader/shortwave/"; then
+if { radiomind_auto_enabled || auto_digest_enabled; } \
+    && echo "$FILE_PATH" | grep -q "/memory/\|radioheader/topics/\|radioheader/shortwave/"; then
   # Increment counter
   count=0
   if [ -f "$CONSOLIDATE_COUNTER" ]; then
@@ -48,17 +66,24 @@ if radiomind_auto_enabled && echo "$FILE_PATH" | grep -q "/memory/\|radioheader/
   count=$((count + 1))
 
   if [ "$count" -ge "$CONSOLIDATE_THRESHOLD" ]; then
-    # Reset counter and run consolidate silently in background
+    # Reset counter and run consolidate silently in background.
+    # radiomind_auto (explicit opt-in) unlocks the full path, which may
+    # delegate to RadioMind (LLM); the default auto_digest scope only ever
+    # runs the native pure-local path.
     echo "0" > "$CONSOLIDATE_COUNTER"
     if command -v radioheader &>/dev/null; then
-      radioheader consolidate >/dev/null 2>&1 &
+      if radiomind_auto_enabled; then
+        radioheader consolidate >/dev/null 2>&1 &
+      else
+        radioheader consolidate --native >/dev/null 2>&1 &
+      fi
     fi
   else
     echo "$count" > "$CONSOLIDATE_COUNTER"
   fi
 
-  # --- RadioMind ingest: feed written content as knowledge ---
-  if command -v radiomind &>/dev/null && [ -n "$FILE_PATH" ] && [ -f "$FILE_PATH" ]; then
+  # --- RadioMind ingest: feed written content as knowledge (opt-in only) ---
+  if radiomind_auto_enabled && command -v radiomind &>/dev/null && [ -n "$FILE_PATH" ] && [ -f "$FILE_PATH" ]; then
     radiomind learn "$(cat "$FILE_PATH" 2>/dev/null | head -c 8000)" >/dev/null 2>&1 &
   fi
 fi

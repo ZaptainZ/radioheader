@@ -25,6 +25,39 @@ if [ -d "$RADIOHEADER_DIR/topics" ]; then
   fi
 fi
 
+# --- Self-heal: rebuild missing derived files (native, pure-local) ---
+# project-registry.json / context-digest.md are machine-local (gitignored by
+# device-sync), so a pull that propagates their untrack commit deletes the
+# working copy — and nothing recreates them while auto-consolidate is gated
+# off. Rebuild them here via the native path only (no RadioMind, no LLM, no
+# network), which keeps this outside the radiomind_auto authorization gate.
+# Default ON (pure-local, zero external side effects). Disable via either:
+#   • ~/.claude/radioheader/config.json :  "auto_digest": false
+#   • environment:                         RADIOHEADER_AUTO_DIGEST=0
+auto_digest_enabled() {
+  case "${RADIOHEADER_AUTO_DIGEST:-}" in
+    0|false|no|off) return 1 ;;
+  esac
+  local cfg="$RADIOHEADER_DIR/config.json"
+  [ -f "$cfg" ] || return 0
+  ! grep -Eq '"auto_digest"[[:space:]]*:[[:space:]]*false' "$cfg" 2>/dev/null
+}
+
+if auto_digest_enabled && command -v radioheader >/dev/null 2>&1; then
+  if [ ! -f "$RADIOHEADER_DIR/project-registry.json" ] || [ ! -f "$RADIOHEADER_DIR/context-digest.md" ]; then
+    # Throttle: skip if another session kicked a rebuild in the last 5 minutes
+    REBUILD_MARKER="$RADIOHEADER_DIR/.digest-rebuilding"
+    marker_ts=$(cat "$REBUILD_MARKER" 2>/dev/null | tr -cd '0-9')
+    marker_ts=${marker_ts:-0}
+    now_ts=$(date +%s)
+    if [ $(( now_ts - marker_ts )) -ge 300 ]; then
+      echo "$now_ts" > "$REBUILD_MARKER" 2>/dev/null || true
+      radioheader consolidate --native >/dev/null 2>&1 &
+      echo "RadioHeader: derived files missing (registry/digest) — rebuilding natively in background (next session will have them)."
+    fi
+  fi
+fi
+
 # Inject context digest (attention-compressed environmental awareness)
 # Budget guard: Claude Code truncates instruction files at ~4K chars.
 # If digest exceeds 3500 chars, inject truncated version with warning.
