@@ -1,3 +1,5 @@
+
+
 # RadioHeader
 
 **Cross-project memory for coding agents — stop re-solving bugs you already fixed in another project.**
@@ -95,7 +97,7 @@ Memory syncs accumulate → every 5 syncs, consolidate runs automatically
                                     ↓
                   Analyzes search logs + project activity + user profile
                                     ↓
-                  Generates context-digest.md (compressed awareness)
+                  Generates context-digest.md (~3.5KB compressed awareness, matching the loader's byte gate)
                                     ↓
                   Next session: Agent starts knowing who it's helping
 ```
@@ -210,7 +212,7 @@ radioheader doctor
 | `doctor` | Health check: hooks, rules, registry, RadioMind |
 | `align` | Topics↔shortwave coverage analysis |
 | `community on\|off` | Toggle community library |
-| `sync` | Pull community library + push votes |
+| `sync` | Pull community library + push your votes |
 | `publish <file>` | Publish shortwave to community (3-gate check) |
 | `vote <id> [+1\|-1]` | Vote on a shortwave entry |
 | `device-sync` | Multi-machine sync via git (auto hooks, optional git-crypt) |
