@@ -9,6 +9,8 @@ RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 HOOKS_DIR="$CLAUDE_DIR/hooks"
 CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
+KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX_DIR="$HOME/.codex"
 CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
 CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
@@ -36,14 +38,14 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "Usage: ./uninstall.sh [--runtime claude|codex|both]"
+      echo "Usage: ./uninstall.sh [--runtime claude|codex|kimi|both|all]"
       exit 1
       ;;
   esac
 done
 
 case "$RUNTIME" in
-  claude|codex|both) ;;
+  claude|codex|kimi|both|all) ;;
   *)
     echo "Invalid runtime: $RUNTIME"
     exit 1
@@ -51,12 +53,37 @@ case "$RUNTIME" in
 esac
 
 claude_enabled() {
-  [ "$RUNTIME" = "claude" ] || [ "$RUNTIME" = "both" ]
+  [ "$RUNTIME" = "claude" ] || [ "$RUNTIME" = "both" ] || [ "$RUNTIME" = "all" ]
 }
 
 codex_enabled() {
-  [ "$RUNTIME" = "codex" ] || [ "$RUNTIME" = "both" ]
+  [ "$RUNTIME" = "codex" ] || [ "$RUNTIME" = "both" ] || [ "$RUNTIME" = "all" ]
 }
+
+kimi_enabled() {
+  [ "$RUNTIME" = "kimi" ] || [ "$RUNTIME" = "all" ]
+}
+
+# "both" retains its original CC+Codex meaning. Never remove shared engines
+# when an installed Kimi runtime still depends on them.
+FULL_UNINSTALL=false
+if [ "$RUNTIME" = "all" ] || { [ "$RUNTIME" = "both" ] &&
+    ! grep -q 'RadioHeader START' "$KIMI_DIR/AGENTS.md" 2>/dev/null &&
+    ! grep -q 'radioheader-kimi.py' "$KIMI_DIR/config.toml" 2>/dev/null; }; then
+  FULL_UNINSTALL=true
+fi
+
+# Validate/remove the owned config first; failure leaves its scripts available.
+if kimi_enabled; then
+  KIMI_PY=""
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import tomllib' 2>/dev/null; then
+      KIMI_PY="$candidate"; break
+    fi
+  done
+  if [ -z "$KIMI_PY" ]; then echo "Kimi configuration needs Python 3.11+"; exit 1; fi
+  "$KIMI_PY" "$SCRIPT_DIR/kimi-config.py" remove --config "$KIMI_DIR/config.toml"
+fi
 
 remove_managed_section() {
   local target="$1"
@@ -151,9 +178,15 @@ if codex_enabled; then
   remove_managed_section "$CODEX_AGENTS" "~/.codex/AGENTS.md"
 fi
 
+if kimi_enabled; then
+  remove_managed_section "$KIMI_DIR/AGENTS.md" "Kimi AGENTS.md"
+  rm -f "$HOOKS_DIR/radioheader-kimi.py"
+fi
+
 # --- Step 2: Remove shared hook scripts only on full uninstall ---
 
-if [ "$RUNTIME" = "both" ]; then
+if [ "$FULL_UNINSTALL" = "true" ]; then
+  rm -f "$HOOKS_DIR/radioheader-kimi.py"
   if [ -f "$HOOKS_DIR/check-project-architecture.sh" ]; then
     rm "$HOOKS_DIR/check-project-architecture.sh"
     ok "Removed check-project-architecture.sh"
@@ -256,7 +289,7 @@ fi
 
 # --- Step 4: Handle radioheader directory ---
 
-if [ "$RUNTIME" = "both" ] && [ -d "$RADIOHEADER_DIR" ]; then
+if [ "$FULL_UNINSTALL" = "true" ] && [ -d "$RADIOHEADER_DIR" ]; then
   TOPIC_COUNT=$(ls "$RADIOHEADER_DIR/topics/"*.md 2>/dev/null | wc -l | tr -d ' ')
 
   if [ "$TOPIC_COUNT" -gt 0 ]; then
@@ -278,7 +311,7 @@ fi
 
 # --- Step 5: Remove CLI and companion scripts ---
 
-COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py"
+COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py"
 
 remove_cli_dir() {
   local dir="$1"
@@ -288,7 +321,7 @@ remove_cli_dir() {
   done
 }
 
-if [ "$RUNTIME" = "both" ] && [ -f "/usr/local/bin/radioheader" ]; then
+if [ "$FULL_UNINSTALL" = "true" ] && [ -f "/usr/local/bin/radioheader" ]; then
   if [ -w "/usr/local/bin" ]; then
     remove_cli_dir "/usr/local/bin"
   else
@@ -300,14 +333,14 @@ if [ "$RUNTIME" = "both" ] && [ -f "/usr/local/bin/radioheader" ]; then
   ok "Removed CLI and companion scripts from /usr/local/bin/"
 fi
 
-if [ "$RUNTIME" = "both" ] && [ -f "$HOME/bin/radioheader" ]; then
+if [ "$FULL_UNINSTALL" = "true" ] && [ -f "$HOME/bin/radioheader" ]; then
   remove_cli_dir "$HOME/bin"
   ok "Removed CLI and companion scripts from ~/bin/"
 fi
 
 # Remove the PATH line install.sh may have added (only the marked block; a
 # user's own PATH lines are untouched because the marker guards the delete)
-if [ "$RUNTIME" = "both" ]; then
+if [ "$FULL_UNINSTALL" = "true" ]; then
   for rc in "$HOME/.zshrc" "$HOME/.bash_profile" "$HOME/.bashrc" "$HOME/.profile"; do
     if [ -f "$rc" ] && grep -q "# Added by RadioHeader install.sh" "$rc"; then
       sed -i.radioheader-uninstall-bak \

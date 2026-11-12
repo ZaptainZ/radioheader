@@ -25,6 +25,7 @@ EXCLUDED_DIRS = {
     ".vscode",
     ".claude",
     ".codex",
+    ".kimi-code",
     "node_modules",
     "Pods",
     "build",
@@ -98,6 +99,7 @@ def tracked_files(cwd: Path):
         cwd / "AGENTS.md",
         cwd / "CLAUDE.md",
         cwd / ".codex",
+        cwd / ".kimi-code",
         cwd / ".claude",
         project_memory_dir(cwd),
         RADIOHEADER_DIR / "topics",
@@ -126,8 +128,9 @@ def snapshot_name(session_id: str, turn_id: str, cwd: str) -> Path:
     return SNAPSHOT_DIR / f"{session_id}-{turn_id}-{digest}.json"
 
 
-def main():
-    payload = json.load(os.fdopen(0))
+def main(payload=None):
+    if payload is None:
+        payload = json.load(os.fdopen(0))
     session_id = payload.get("session_id", "unknown")
     turn_id = payload.get("turn_id", "unknown")
     try:

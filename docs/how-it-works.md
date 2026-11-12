@@ -158,3 +158,7 @@ Codex counts turns with actual changes to project memory, global topics, or shor
 Reinstalling refreshes generated device-sync adapters and local ignore metadata via `device-sync refresh`. This operation does not contact the remote or enable disabled sync. The next normal sync handles updated metadata.
 
 Codex requires review of new or changed hook definitions through `/hooks`; installing hook files alone does not establish trust. Current Codex also supports `apply_patch` PostToolUse events, but the snapshot adapter continues to cover file edits regardless of tool choice. See [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks). Regression tests exercise protocol fixtures; real-client acceptance must separately verify that hooks actually run and that model authentication is available.
+
+### Kimi Code adapter (2.5)
+
+Kimi reuses the snapshot engine with its own state directory and consolidation counter. Its prompt hook returns a `message`; its Stop hook requests continuation through exit code 2 and stderr. Global TOML hooks are managed without replacing user model/provider settings. `SessionEnd` flushes compensation writes because Kimi 2.3.3 does not repeat Stop after continuation. See [Kimi Code integration](kimi-code.md) for setup, lifecycle and compatibility boundaries.

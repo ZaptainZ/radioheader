@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# RadioHeader — Cross-project memory framework for Claude Code and Codex
+# RadioHeader — Cross-project memory framework for Claude Code, Codex, and Kimi Code
 # https://github.com/ZaptainZ/radioheader
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -13,6 +13,8 @@ SETTINGS_JSON="$CLAUDE_DIR/settings.json"
 CODEX_DIR="$HOME/.codex"
 CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
 CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
+KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
+KIMI_PY=""
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 RUNTIME="both"
 ASSUME_YES=false
@@ -55,7 +57,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<EOF
-Usage: ./install.sh [--runtime claude|codex|both] [--yes] [--bin-dir /absolute/path]
+Usage: ./install.sh [--runtime claude|codex|kimi|both|all] [--yes] [--bin-dir /absolute/path]
 --yes reinstalls without prompts, preserving the community preference (default off).
 EOF
       exit 0
@@ -68,20 +70,36 @@ EOF
 done
 
 case "$RUNTIME" in
-  claude|codex|both) ;;
+  claude|codex|kimi|both|all) ;;
   *)
-    err "Invalid runtime: $RUNTIME (expected claude, codex, or both)"
+    err "Invalid runtime: $RUNTIME (expected claude, codex, kimi, both, or all)"
     exit 1
     ;;
 esac
 
 claude_enabled() {
-  [ "$RUNTIME" = "claude" ] || [ "$RUNTIME" = "both" ]
+  [ "$RUNTIME" = "claude" ] || [ "$RUNTIME" = "both" ] || [ "$RUNTIME" = "all" ]
 }
 
 codex_enabled() {
-  [ "$RUNTIME" = "codex" ] || [ "$RUNTIME" = "both" ]
+  [ "$RUNTIME" = "codex" ] || [ "$RUNTIME" = "both" ] || [ "$RUNTIME" = "all" ]
 }
+
+kimi_enabled() {
+  [ "$RUNTIME" = "kimi" ] || [ "$RUNTIME" = "all" ]
+}
+
+# Parse TOML before changing any runtime files. Kimi keeps provider credentials
+# here, so invalid config must be preserved and reported, never reset.
+if kimi_enabled; then
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import tomllib' 2>/dev/null; then
+      KIMI_PY="$candidate"; break
+    fi
+  done
+  if [ -z "$KIMI_PY" ]; then err "Kimi configuration needs Python 3.11+"; exit 1; fi
+  "$KIMI_PY" "$SCRIPT_DIR/kimi-config.py" validate --config "$KIMI_DIR/config.toml"
+fi
 
 append_managed_section() {
   local target="$1"
@@ -321,7 +339,9 @@ chmod +x "$HOOKS_DIR/radioheader-codex-userprompt.py"
 cp "$SCRIPT_DIR/templates/hooks/radioheader-stop-codex.py" "$HOOKS_DIR/radioheader-stop-codex.py"
 chmod +x "$HOOKS_DIR/radioheader-stop-codex.py"
 
-ok "Installed hook scripts (7 hooks)"
+cp "$SCRIPT_DIR/templates/hooks/radioheader-kimi.py" "$HOOKS_DIR/radioheader-kimi.py"
+chmod +x "$HOOKS_DIR/radioheader-kimi.py"
+ok "Installed shared runtime hook scripts"
 
 # --- Step 3: Append rules to CLAUDE.md ---
 
@@ -519,6 +539,12 @@ if codex_enabled; then
   fi
 fi
 
+if kimi_enabled; then
+  append_managed_section "$KIMI_DIR/AGENTS.md" "$SCRIPT_DIR/templates/global-agents-md.md" "Kimi AGENTS.md"
+  "$KIMI_PY" "$SCRIPT_DIR/kimi-config.py" install --config "$KIMI_DIR/config.toml"
+  ok "Merged RadioHeader hooks into $KIMI_DIR/config.toml (other hooks preserved)"
+fi
+
 # --- Step 5: Install CLI ---
 
 CLI_INSTALLED=""
@@ -590,7 +616,7 @@ echo ""
 info "Running post-install initialization..."
 
 # Copy Python scripts alongside CLI
-for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py; do
+for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py; do
   if [ -f "$SCRIPT_DIR/$pyfile" ]; then
     cp "$SCRIPT_DIR/$pyfile" "$(dirname "$CLI_INSTALLED")/$pyfile"
     if [[ "$pyfile" == "radioheader-mcp-server.py" ]]; then
@@ -681,7 +707,11 @@ echo -e "${GREEN}  RadioHeader installed successfully!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "What's next:"
-if [ "$RUNTIME" = "both" ]; then
+if [ "$RUNTIME" = "all" ]; then
+  echo "  1. Open Claude Code, Codex, or Kimi Code; follow client permission prompts"
+elif [ "$RUNTIME" = "kimi" ]; then
+  echo "  1. Open Kimi Code in a project; global rules and hooks are installed"
+elif [ "$RUNTIME" = "both" ]; then
   echo "  1. Open any project with Claude Code or Codex — RadioHeader is already active"
 elif [ "$RUNTIME" = "claude" ]; then
   echo "  1. Open any project with Claude Code — RadioHeader is already active"
@@ -720,3 +750,8 @@ echo "  CLI:          $CLI_INSTALLED"
 echo ""
 echo "Backups (if any) have a .bak.$TIMESTAMP suffix."
 echo ""
+
+if kimi_enabled; then
+  echo "  Kimi rules: $KIMI_DIR/AGENTS.md"
+  echo "  Kimi hooks: $KIMI_DIR/config.toml"
+fi

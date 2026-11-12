@@ -13,7 +13,7 @@ Claude: RadioHeader has experience from ProjectA:
         Verifying this applies here... ✓ Same pattern. Applying fix.
 ```
 
-One install. Works on Claude Code, Codex CLI, and any MCP-compatible agent. Shared memory with runtime-native hooks.
+One install. Works on Claude Code, Codex CLI, Kimi Code, and any MCP-compatible agent. Shared memory with runtime-native hooks.
 
 [中文文档](README_zh.md) · [How It Works](docs/how-it-works.md) · [MCP Server](docs/mcp-server.md) · [Lessons Learned](docs/lessons-learned.md)
 
@@ -91,7 +91,7 @@ RadioHeader (~/.claude/radioheader/)
 Human memory compresses during sleep: episodes fade, but patterns solidify. RadioHeader's `consolidate` does the same:
 
 ```
-Memory syncs accumulate → every 5 writes (Claude) / changed turns (Codex), consolidate runs automatically
+Memory syncs accumulate → every 5 writes (Claude) / changed turns (Codex/Kimi), consolidate runs automatically
                                     ↓
                   Analyzes search logs + project activity + user profile
                                     ↓
@@ -150,15 +150,17 @@ See [docs/mcp-server.md](docs/mcp-server.md) for client-specific setup and a rec
 
 RadioHeader ships a single data layer with **runtime adapters** that plug into whichever coding agent you're using:
 
-| | Claude Code | Codex CLI | MCP agents |
-|---|---|---|---|
-| Entry file | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | System prompt |
-| Echo trigger | `PostToolUse Write\|Edit` | `UserPromptSubmit` snapshot + `Stop` diff | — |
-| Per-project scaffold | `.claude/settings.json` | `.codex/hooks.json` | — |
+| | Claude Code | Codex CLI | Kimi Code | MCP agents |
+|---|---|---|---|---|
+| Entry file | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | `~/.kimi-code/AGENTS.md` | System prompt |
+| Echo trigger | `PostToolUse Write\|Edit` | `UserPromptSubmit` snapshot + `Stop` diff | Snapshot + Kimi Stop continuation | — |
+| Per-project scaffold | `.claude/settings.json` | `.codex/hooks.json` | `.kimi-code/AGENTS.md` (user-level hooks) | — |
 
 The Codex adapter uses a **snapshot + diff** loop (including edits made through `apply_patch` or shell commands): `UserPromptSubmit` fingerprints memory/topics/shortwave before each turn; `Stop` diffs against that fingerprint and uses `decision: block` with a continuation prompt if any step in the Echo chain was skipped.
 
 First-run permissions still belong to the client. In Codex, review new or changed hooks through `/hooks` before they can run. In Claude Code, writes to global topics and shortwave files under `~/.claude/` can prompt even in `acceptEdits`; ordinary settings allow rules do not pre-approve protected-path writes. Approve the intended edit in the normal permission prompt. A headless `-p` run that cannot obtain approval may leave the Echo chain incomplete. See [Codex hook trust](https://learn.chatgpt.com/docs/hooks) and [Claude protected paths](https://code.claude.com/docs/en/permission-modes#protected-paths).
+
+Kimi Code 2.3.3 integration requires **Python 3.11+**: UserPromptSubmit injects context, Stop uses exit code 2 for continuation, and existing models/custom hooks are preserved. Default `both` remains CC + Codex; use `all` for three runtimes. See [Kimi setup, validation and lifecycle limits](docs/kimi-code.md).
 
 Python hooks target **Python 3.7+** (`from __future__ import annotations`). Snapshot walker caps at 10k files with 24h TTL cleanup.
 
@@ -177,7 +179,9 @@ That's it. Start Claude Code or Codex in any project — hooks fire, rules are l
 ```bash
 ./install.sh --runtime claude   # only Claude Code
 ./install.sh --runtime codex    # only Codex CLI
-./install.sh --runtime both     # default
+./install.sh --runtime both     # default: CC + Codex
+./install.sh --runtime kimi     # only Kimi Code
+./install.sh --runtime all      # all three runtimes
 ```
 
 Optionally, run `radioheader init` inside a project for per-project scaffolding (Echo rules, log directory, doc templates).
@@ -193,7 +197,7 @@ radioheader index --rebuild  # rebuild derived search data if needed
 radioheader consolidate --native
 ```
 
-Version 2.4.1 adds Codex native digest refresh every five changed memory turns, refreshes generated device-sync adapters during reinstall without changing sync preferences, and repairs incremental FTS updates, separates local/community IDs, restores registry backups, fixes Codex memory paths and background opt-in, and removes author-specific template paths. `doctor` checks FTS integrity on a read-only snapshot and exits nonzero when issues are found.
+Version 2.5.0 adds Kimi Code integration (`--runtime kimi|all`). Version 2.4.1 adds Codex native digest refresh every five changed memory turns, refreshes generated device-sync adapters during reinstall without changing sync preferences, and repairs incremental FTS updates, separates local/community IDs, restores registry backups, fixes Codex memory paths and background opt-in, and removes author-specific template paths. `doctor` checks FTS integrity on a read-only snapshot and exits nonzero when issues are found.
 
 Run the local suite with `python3 -m unittest discover -s tests -p 'test_maintenance.py'`, `python3 tests/test_digest_quality.py`, `bash tests/test_auto_digest.sh`, and `bash tests/test_device_sync.sh`.
 
@@ -218,7 +222,7 @@ radioheader doctor
 | Command | What it does |
 |---------|-------------|
 | `search <query>` | BM25 + synonym search across topics, shortwave, community |
-| `init` | Project scaffolding (`--runtime claude\|codex\|both`) |
+| `init` | Project scaffolding (`--runtime claude\|codex\|kimi\|both\|all`) |
 | `index [--rebuild]` | Build/update FTS5 search index |
 | `learn <url>` | Extract article into shortwave entry |
 | `consolidate` | Update attention weights and context digest |

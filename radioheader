@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# RadioHeader CLI — Cross-project experience sharing for Claude Code and Codex
+# RadioHeader CLI — Cross-project experience sharing for Claude Code, Codex, and Kimi Code
 # Usage: radioheader <command> [options]
 
-VERSION="2.4.1"
+VERSION="2.5.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -20,6 +20,7 @@ INDEX="$RADIOHEADER_DIR/INDEX.md"
 CODEX_DIR="$HOME/.codex"
 CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
 CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
+KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 
 # Default community repository (users can override in config.json)
 DEFAULT_COMMUNITY_REPO="https://github.com/ZaptainZ/radioheader-community.git"
@@ -106,10 +107,35 @@ print_radiomind_suggestion() {
   radiomind_mark_suggested
 }
 
+kimi_runtime_enabled() {
+  grep -q "RadioHeader START" "$KIMI_DIR/AGENTS.md" 2>/dev/null ||
+    grep -q 'radioheader-kimi.py' "$KIMI_DIR/config.toml" 2>/dev/null
+}
+
+check_kimi_runtime() {
+  local helper="$(dirname "${BASH_SOURCE[0]}")/kimi-config.py" candidate
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11 /opt/homebrew/bin/python3; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import tomllib' 2>/dev/null; then
+      "$candidate" "$helper" check --config "$KIMI_DIR/config.toml"
+      return $?
+    fi
+  done
+  echo "Kimi configuration check needs Python 3.11+"
+  return 1
+}
+
+sync_hooks_registered() {
+  [ "$(config_get device_sync_enabled false)" = "true" ] || return 1
+  grep -q "radioheader-git-sync.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null ||
+    grep -q "radioheader-git-sync.sh" "$CODEX_HOOKS_JSON" 2>/dev/null ||
+    { kimi_runtime_enabled && check_kimi_runtime >/dev/null 2>&1; }
+}
+
 project_runtime_summary() {
   local modes=()
   [ -f "CLAUDE.md" ] && modes+=("claude")
   [ -f "AGENTS.md" ] && modes+=("codex")
+  [ -f ".kimi-code/AGENTS.md" ] && modes+=("kimi")
   if [ "${#modes[@]}" -eq 0 ]; then
     echo "none"
   else
@@ -193,7 +219,7 @@ cmd_help() {
   cat <<EOF
 
 ${BOLD}RadioHeader CLI${NC} v${VERSION}
-Cross-project experience sharing for Claude Code and Codex
+Cross-project experience sharing for Claude Code, Codex, and Kimi Code
 
 ${BOLD}USAGE${NC}
   radioheader <command> [options]
@@ -277,7 +303,7 @@ ${BOLD}FLAGS${NC}
   --stack <stack>    Tech stack, e.g. "iOS/SwiftUI" (required)
   --doc-dir <dir>   Documentation directory name (default: projectBasicInfo)
   --terms <terms>   Terminology mappings (optional)
-  --runtime <mode>  claude | codex | both (default: both)
+  --runtime <mode>  claude | codex | kimi | both | all (default: both)
 
 ${BOLD}INTERACTIVE MODE${NC}
   Run without flags to be prompted for each value.
@@ -299,9 +325,9 @@ EOF
   fi
 
   case "$runtime" in
-    claude|codex|both) ;;
+    claude|codex|kimi|both|all) ;;
     *)
-      err "Invalid runtime: $runtime (expected claude, codex, or both)"
+      err "Invalid runtime: $runtime (expected claude, codex, kimi, both, or all)"
       return 1
       ;;
   esac
@@ -313,7 +339,7 @@ EOF
   fi
 
   # Check if already initialized
-  if [ -f ".claude/rules/memory-echo.md" ] || [ -f "CLAUDE.md" ] || [ -f "AGENTS.md" ]; then
+  if [ -f ".claude/rules/memory-echo.md" ] || [ -f "CLAUDE.md" ] || [ -f "AGENTS.md" ] || [ -f ".kimi-code/AGENTS.md" ]; then
     warn "This project appears to be already initialized."
     read -p "Re-initialize? Existing files will NOT be overwritten. [y/N] " -n 1 -r
     echo
@@ -369,13 +395,13 @@ EOF
 
   mkdir -p ".claude/hooks"
   mkdir -p ".claude/rules"
-  mkdir -p ".codex/hooks"
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then mkdir -p ".codex/hooks"; fi
   mkdir -p "$doc_dir/logs"
 
   # --- Copy and process template files ---
 
   # CLAUDE.md
-  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f "CLAUDE.md" ]; then
       warn "CLAUDE.md already exists, skipping (not overwriting)"
     else
@@ -389,7 +415,7 @@ EOF
   fi
 
   # AGENTS.md
-  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f "AGENTS.md" ]; then
       warn "AGENTS.md already exists, skipping (not overwriting)"
     else
@@ -402,8 +428,20 @@ EOF
     fi
   fi
 
+  if [ "$runtime" = "kimi" ] || [ "$runtime" = "all" ]; then
+    mkdir -p .kimi-code
+    if [ ! -f .kimi-code/AGENTS.md ]; then
+      cp "$TEMPLATES_DIR/AGENTS.md.template" .kimi-code/AGENTS.md
+      sedi "s|__PROJECT_NAME__|$project_name|g" .kimi-code/AGENTS.md
+      sedi "s|__TECH_STACK__|$tech_stack|g" .kimi-code/AGENTS.md
+      sedi "s|__TERMINOLOGY__|$terminology|g" .kimi-code/AGENTS.md
+      sedi "s|__DOC_DIR__|$doc_dir|g" .kimi-code/AGENTS.md
+      ok "Created .kimi-code/AGENTS.md (Kimi hooks remain user-level)"
+    fi
+  fi
+
   # .claude/settings.json
-  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f ".claude/settings.json" ]; then
       warn ".claude/settings.json already exists, skipping"
     else
@@ -413,7 +451,7 @@ EOF
   fi
 
   # .codex/hooks.json
-  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f ".codex/hooks.json" ]; then
       warn ".codex/hooks.json already exists, skipping"
     else
@@ -423,7 +461,7 @@ EOF
   fi
 
   # .claude/hooks/load-project-rules.sh
-  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f ".claude/hooks/load-project-rules.sh" ]; then
       warn ".claude/hooks/load-project-rules.sh already exists, skipping"
     else
@@ -434,7 +472,7 @@ EOF
   fi
 
   # .codex/hooks/load-project-rules.sh
-  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f ".codex/hooks/load-project-rules.sh" ]; then
       warn ".codex/hooks/load-project-rules.sh already exists, skipping"
     else
@@ -445,7 +483,7 @@ EOF
   fi
 
   # .codex/hooks/stop-reminder.py
-  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     if [ -f ".codex/hooks/stop-reminder.py" ]; then
       warn ".codex/hooks/stop-reminder.py already exists, skipping"
     else
@@ -621,12 +659,12 @@ with open('$REGISTRY_JSON', 'w') as f:
   echo -e "${GREEN}========================================${NC}"
   echo ""
   echo "Created:"
-  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "claude" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     echo "  CLAUDE.md"
     echo "  .claude/settings.json"
     echo "  .claude/hooks/load-project-rules.sh"
   fi
-  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "codex" ] || [ "$runtime" = "both" ] || [ "$runtime" = "all" ]; then
     echo "  AGENTS.md"
     echo "  .codex/hooks.json"
     echo "  .codex/hooks/{load-project-rules.sh,stop-reminder.py}"
@@ -635,7 +673,9 @@ with open('$REGISTRY_JSON', 'w') as f:
   echo "  $doc_dir/{00_AGENT_RULES,01_PROJECT_OVERVIEW}.md"
   echo "  $doc_dir/logs/"
   echo ""
-  if [ "$runtime" = "both" ]; then
+  if [ "$runtime" = "kimi" ] || [ "$runtime" = "all" ]; then
+    echo "Next: Open Kimi Code (install --runtime kimi or all for global hooks)."
+  elif [ "$runtime" = "both" ]; then
     echo "Next: Open this project with Claude Code or Codex to start using RadioHeader."
   elif [ "$runtime" = "claude" ]; then
     echo "Next: Open this project with Claude Code to start using RadioHeader."
@@ -1230,6 +1270,10 @@ PY
     echo -e "  ${YELLOW}~${NC} Project templates not installed (CLI init won't work)"
   fi
 
+  if kimi_runtime_enabled; then
+    echo -e "  Kimi runtime enabled ($KIMI_DIR)"
+    check_kimi_runtime || true
+  fi
   echo -e "  Project runtime: $(project_runtime_summary)"
 
   echo ""
@@ -1437,6 +1481,15 @@ cmd_doctor() {
     issues=$((issues + 1))
   else
     :
+  fi
+
+  if kimi_runtime_enabled; then
+    if check_kimi_runtime; then
+      echo -e "  ${GREEN}✓${NC} Kimi runtime configured"
+    else
+      echo -e "  ${RED}✗${NC} Kimi runtime needs repair"
+      issues=$((issues + 1))
+    fi
   fi
 
   # Templates
@@ -1755,10 +1808,10 @@ PY
       echo -e "  ${RED}✗${NC} Sync hook script missing — run 'radioheader device-sync init' to rewrite it"
       issues=$((issues + 1))
     fi
-    if grep -q "radioheader-git-sync.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null; then
+    if sync_hooks_registered; then
       echo -e "  ${GREEN}✓${NC} Auto-sync hooks registered (SessionStart pull / Stop push)"
     else
-      echo -e "  ${YELLOW}!${NC} Hooks not registered in settings.json — run 'radioheader device-sync init'"
+      echo -e "  ${YELLOW}!${NC} Sync hooks not registered in an installed runtime — run 'radioheader device-sync init'"
       issues=$((issues + 1))
     fi
     if [ -f "$RADIOHEADER_DIR/.sync-diverged" ]; then
@@ -3329,6 +3382,9 @@ pending-publish/
 .consolidate-counter
 .codex-consolidate-counter
 .codex-consolidate.log
+.kimi-turn-snapshots/
+.kimi-consolidate-counter
+.kimi-consolidate.log
 .digest-rebuilding
 .radiomind-suggested
 .sync.lock
@@ -3566,7 +3622,11 @@ GITSYNC_HOOK
 # Values cross into python via env vars to avoid shell-escaping issues.
 _sync_hooks_json() {
   local mode="$1"
-  _sync_hooks_json_one "$mode" "$SYNC_SETTINGS_JSON" ""
+  # Kimi's permanent lifecycle adapter delegates sync behind the existing
+  # opt-in gate. Do not accidentally enable Claude on a Kimi-only install.
+  if [ -f "$SYNC_SETTINGS_JSON" ] || [ -f "$CLAUDE_DIR/CLAUDE.md" ] || ! kimi_runtime_enabled; then
+    _sync_hooks_json_one "$mode" "$SYNC_SETTINGS_JSON" ""
+  fi
   if [ -f "$CODEX_HOOKS_JSON" ]; then
     _sync_hooks_json_one "$mode" "$CODEX_HOOKS_JSON" "startup|resume"
   fi
@@ -4404,7 +4464,7 @@ cmd_device_sync() {
         echo "$(_ds st_pending "$changed")"
       fi
 
-      if grep -q "radioheader-git-sync.sh" "$SYNC_SETTINGS_JSON" 2>/dev/null; then
+      if sync_hooks_registered; then
         echo "$(_ds st_hooks_on)"
       else
         echo "$(_ds st_hooks_off)"
@@ -4805,6 +4865,8 @@ PY
 
     local has_claude=false
     local has_codex=false
+    local has_kimi=false
+    [ -d "$ppath/.kimi-code" ] && has_kimi=true
     if [ -f "$ppath/CLAUDE.md" ] || [ -f "$ppath/.claude/settings.json" ]; then
       has_claude=true
     fi
@@ -4819,6 +4881,8 @@ PY
       metadata_source="$ppath/CLAUDE.md"
     elif [ -f "$ppath/AGENTS.md" ]; then
       metadata_source="$ppath/AGENTS.md"
+    elif [ -f "$ppath/.kimi-code/AGENTS.md" ]; then
+      metadata_source="$ppath/.kimi-code/AGENTS.md"
     fi
     if [ -n "$metadata_source" ]; then
       local parsed_stack
@@ -4957,6 +5021,20 @@ PY
         fi
         project_changes=$((project_changes + 1))
       fi
+    fi
+
+    if [ "$has_kimi" = true ] && [ ! -f "$ppath/.kimi-code/AGENTS.md" ]; then
+      if [ "$dry_run" = true ]; then
+        echo -e "    ${YELLOW}+${NC} Would add missing: .kimi-code/AGENTS.md"
+      else
+        cp "$TEMPLATES_DIR/AGENTS.md.template" "$ppath/.kimi-code/AGENTS.md"
+        sedi "s|__PROJECT_NAME__|$pname|g" "$ppath/.kimi-code/AGENTS.md"
+        sedi "s|__TECH_STACK__|$project_tech_stack|g" "$ppath/.kimi-code/AGENTS.md"
+        sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/.kimi-code/AGENTS.md"
+        sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/.kimi-code/AGENTS.md"
+        echo -e "    ${GREEN}+${NC} Added missing: .kimi-code/AGENTS.md"
+      fi
+      project_changes=$((project_changes + 1))
     fi
 
     if [ "$has_codex" = true ] && [ -f "$TEMPLATES_DIR/AGENTS.md.template" ]; then

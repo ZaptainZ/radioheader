@@ -14,12 +14,14 @@ from pathlib import Path
 
 RADIOHEADER_DIR = Path.home() / ".claude" / "radioheader"
 SNAPSHOT_DIR = RADIOHEADER_DIR / ".codex-turn-snapshots"
+DIGEST_RUNTIME = "codex"
 EXCLUDED_DIRS = {
     ".git",
     ".idea",
     ".vscode",
     ".claude",
     ".codex",
+    ".kimi-code",
     "node_modules",
     "Pods",
     "build",
@@ -83,6 +85,7 @@ def tracked_files(cwd: Path, doc_dir: Path | None, memory_dir: Path):
         cwd / "AGENTS.md",
         cwd / "CLAUDE.md",
         cwd / ".codex",
+        cwd / ".kimi-code",
         cwd / ".claude",
         memory_dir,
         RADIOHEADER_DIR / "topics",
@@ -193,7 +196,7 @@ def refresh_digest():
         return
     try:
         RADIOHEADER_DIR.mkdir(parents=True, exist_ok=True)
-        counter = RADIOHEADER_DIR / ".codex-consolidate-counter"
+        counter = RADIOHEADER_DIR / ("." + DIGEST_RUNTIME + "-consolidate-counter")
         with counter.open("a+") as stream:
             fcntl.flock(stream, fcntl.LOCK_EX)
             stream.seek(0)
@@ -206,7 +209,7 @@ def refresh_digest():
                 args = [command, "consolidate"]
                 if not radiomind_auto_enabled():
                     args.append("--native")
-                with (RADIOHEADER_DIR / ".codex-consolidate.log").open("a") as log:
+                with (RADIOHEADER_DIR / ("." + DIGEST_RUNTIME + "-consolidate.log")).open("a") as log:
                     subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log,
                                      stderr=log, start_new_session=True)
                 count = 0
@@ -218,9 +221,10 @@ def refresh_digest():
         pass
 
 
-def main():
+def main(payload=None):
     os.environ["PATH"] = str(Path.home() / "bin") + os.pathsep + str(Path.home() / ".local/bin") + os.pathsep + os.environ.get("PATH", "")
-    payload = json.load(os.fdopen(0))
+    if payload is None:
+        payload = json.load(os.fdopen(0))
     session_id = payload.get("session_id", "unknown")
     turn_id = payload.get("turn_id", "unknown")
     cwd = Path(payload["cwd"]).resolve()
@@ -260,6 +264,7 @@ def main():
     claude_dir = cwd / ".claude"
     claude_rules_dir = cwd / ".claude" / "rules"
     codex_dir = cwd / ".codex"
+    kimi_dir = cwd / ".kimi-code"
 
     topic_changes = [p for p in changes if is_under(Path(p), topic_root)]
     shortwave_changes = [p for p in changes if is_under(Path(p), shortwave_root)]
@@ -273,6 +278,7 @@ def main():
         for p in changes
         if Path(p) in {cwd / "AGENTS.md", cwd / "CLAUDE.md"}
         or is_under(Path(p), codex_dir)
+        or is_under(Path(p), kimi_dir)
         or is_under(Path(p), claude_dir)
     ]
     project_doc_changes = [
@@ -290,6 +296,7 @@ def main():
         and not is_under(Path(p), doc_dir)
         and not is_under(Path(p), claude_rules_dir)
         and not is_under(Path(p), codex_dir)
+        and not is_under(Path(p), kimi_dir)
         and Path(p) not in {cwd / "AGENTS.md", cwd / "CLAUDE.md"}
     ]
 
