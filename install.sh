@@ -291,7 +291,9 @@ fi
 
 TEMPLATE_DEST="$RADIOHEADER_DIR/templates/project"
 mkdir -p "$TEMPLATE_DEST"
-cp -R "$SCRIPT_DIR/templates/project/" "$TEMPLATE_DEST/"
+# '/.' copies contents on both BSD/macOS and GNU/Linux; a trailing slash
+# alone nests another project/ directory on GNU cp when the target exists.
+cp -R "$SCRIPT_DIR/templates/project/." "$TEMPLATE_DEST/"
 ok "Installed project templates → $TEMPLATE_DEST"
 
 # --- Step 2: Install hook scripts ---
