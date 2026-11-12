@@ -13,7 +13,7 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
         验证一下是否适用…… ✓ 同样的模式。正在修复。
 ```
 
-一次安装，Claude Code、Codex CLI 和所有 MCP 兼容 Agent 通用。零配置。
+一次安装，Claude Code、Codex CLI 和所有 MCP 兼容 Agent 通用，共享同一份记忆。
 
 [English](README.md) · [工作原理](docs/how-it-works.md) · [MCP 服务](docs/mcp-server.md) · [实战经验](docs/lessons-learned.md)
 
@@ -157,6 +157,8 @@ RadioHeader 的数据层只有一份，上层通过**运行时适配器**对接�
 | 项目脚手架 | `.claude/settings.json` | `.codex/hooks.json` | — |
 
 Codex 侧采用**快照 + 差分**闭环（涵盖 `apply_patch` 和 shell 写入）：`UserPromptSubmit` 在每个 turn 前对 memory/topics/shortwave 做指纹；`Stop` 时 diff，发现 Echo 链有缺位就用 `decision: block` + continuation prompt 补齐。
+
+首次使用仍需遵循客户端权限流程：Codex 的新增或变更 Hook 要先通过 `/hooks` 审阅；CC 写入 `~/.claude/` 下的全局 topics/shortwave 时，即使处于 `acceptEdits`，也可能要求确认，普通 settings allow 规则不能预先批准受保护路径写入。请在正常权限提示中批准具体编辑；无法取得批准的无界面 `-p` 会话可能无法完成 Echo 链。参见 [Codex Hook 信任](https://learn.chatgpt.com/docs/hooks) 和 [CC 受保护路径](https://code.claude.com/docs/en/permission-modes#protected-paths)。
 
 Python hooks 目标 **Python 3.7+**（`from __future__ import annotations`）。仓库遍历上限 10k 文件，24 小时 TTL 自动清理陈旧快照。
 

@@ -13,7 +13,7 @@ Claude: RadioHeader has experience from ProjectA:
         Verifying this applies here... ✓ Same pattern. Applying fix.
 ```
 
-One install. Works on Claude Code, Codex CLI, and any MCP-compatible agent. Zero config.
+One install. Works on Claude Code, Codex CLI, and any MCP-compatible agent. Shared memory with runtime-native hooks.
 
 [中文文档](README_zh.md) · [How It Works](docs/how-it-works.md) · [MCP Server](docs/mcp-server.md) · [Lessons Learned](docs/lessons-learned.md)
 
@@ -157,6 +157,8 @@ RadioHeader ships a single data layer with **runtime adapters** that plug into w
 | Per-project scaffold | `.claude/settings.json` | `.codex/hooks.json` | — |
 
 The Codex adapter uses a **snapshot + diff** loop (including edits made through `apply_patch` or shell commands): `UserPromptSubmit` fingerprints memory/topics/shortwave before each turn; `Stop` diffs against that fingerprint and uses `decision: block` with a continuation prompt if any step in the Echo chain was skipped.
+
+First-run permissions still belong to the client. In Codex, review new or changed hooks through `/hooks` before they can run. In Claude Code, writes to global topics and shortwave files under `~/.claude/` can prompt even in `acceptEdits`; ordinary settings allow rules do not pre-approve protected-path writes. Approve the intended edit in the normal permission prompt. A headless `-p` run that cannot obtain approval may leave the Echo chain incomplete. See [Codex hook trust](https://learn.chatgpt.com/docs/hooks) and [Claude protected paths](https://code.claude.com/docs/en/permission-modes#protected-paths).
 
 Python hooks target **Python 3.7+** (`from __future__ import annotations`). Snapshot walker caps at 10k files with 24h TTL cleanup.
 
