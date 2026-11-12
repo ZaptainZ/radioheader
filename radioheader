@@ -1482,8 +1482,9 @@ cmd_doctor() {
 
   if [ -f "$RADIOHEADER_DIR/context-digest.md" ]; then
     local digest_mtime now_ts digest_age_days
-    digest_mtime=$(stat -f %m "$RADIOHEADER_DIR/context-digest.md" 2>/dev/null \
-      || stat -c %Y "$RADIOHEADER_DIR/context-digest.md" 2>/dev/null || echo 0)
+    if ! digest_mtime=$(stat -f %m "$RADIOHEADER_DIR/context-digest.md" 2>/dev/null); then
+      digest_mtime=$(stat -c %Y "$RADIOHEADER_DIR/context-digest.md" 2>/dev/null || echo 0)
+    fi
     now_ts=$(date +%s)
     digest_age_days=$(( (now_ts - digest_mtime) / 86400 ))
     if [ "$digest_mtime" -gt 0 ] && [ "$digest_age_days" -gt 14 ]; then
@@ -3418,7 +3419,16 @@ if grep -Eq '"device_sync_project_memories"[[:space:]]*:[[:space:]]*true' "$RH/c
   PM_ON=1
 fi
 
-f_mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || echo 0; }
+f_mtime() {
+  local value
+  # GNU stat -f can print filesystem information before failing on %m.
+  # Capture/discard that output; only emit the successful dialect's value.
+  if value=$(stat -f %m "$1" 2>/dev/null); then
+    printf '%s\n' "$value"
+  else
+    stat -c %Y "$1" 2>/dev/null || echo 0
+  fi
+}
 # staging dir key <-> local project dir: only the username segment differs
 to_local_dir() { printf '%s' "$1" | sed "s/^-HOME-/-Users-$ME-/"; }
 

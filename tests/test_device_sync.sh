@@ -202,7 +202,7 @@ else
   check "tombstone consumed on E"        "[ ! -f '$HOME_E/.claude/radioheader/project-memories/-HOME-ProjX/creds.md.tombstone' ]"
   hook "$HOME_D" push
   check "D got the recreated file back"  "grep -q RECREATED '$MEM_D/creds.md'"
-  check "recreated file cipher in vault" "! git -C '$VAULT3' cat-file blob HEAD:project-memories/-HOME-ProjX/creds.md | LC_ALL=C grep -aq RECREATED"
+  check "recreated file cipher in vault" "git -C '$VAULT3' cat-file blob HEAD:project-memories/-HOME-ProjX/creds.md | head -c 16 | LC_ALL=C grep -aq GITCRYPT"
 
   echo "-- keyless machine can never leak plaintext --"
   mk_home "$HOME_F"
