@@ -30,6 +30,7 @@ FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // empty' 2>/dev/null)
 radiomind_auto_enabled() {
   case "${RADIOHEADER_RADIOMIND_AUTO:-}" in
     1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
   esac
   local cfg="$HOME/.claude/radioheader/config.json"
   [ -f "$cfg" ] || return 1

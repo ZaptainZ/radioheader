@@ -1,0 +1,25 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  regression:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install local test tools
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            brew install git-crypt jq
+          else
+            sudo apt-get update
+            sudo apt-get install -y git-crypt jq
+          fi
+      - run: python3 -m unittest discover -s tests -p 'test_maintenance.py' -v
+      - run: python3 tests/test_digest_quality.py
+      - run: bash tests/test_auto_digest.sh
+      - run: bash tests/test_device_sync.sh

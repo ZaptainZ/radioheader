@@ -28,7 +28,7 @@ RadioHeader solves this with three mechanisms:
 | Mechanism | What it does |
 |-----------|-------------|
 | **Echo** | After each task, experience flows back from the project into the global memory hub — automatically, via hooks |
-| **Search → Apply → Trace** | A mandatory behavioral rule injected into `CLAUDE.md` / `AGENTS.md`. The agent **must** search before starting independent analysis, **must** cite what it finds, and is **prohibited** from ignoring matching experience |
+| **Search → Apply → Trace** | Guidance injected into `CLAUDE.md` / `AGENTS.md`: search when prior experience is likely relevant, verify matching entries, cite and apply them, and trace their source when needed |
 | **Shortwave** | Strips project names, file paths, and framework details from experience entries, producing universal knowledge units searchable across any tech stack |
 
 The result: the second time any agent in any project hits a similar problem, the answer is already there. Minutes to seconds.
@@ -38,7 +38,7 @@ The result: the second time any agent in any project hits a similar problem, the
 | Capability | Without RadioHeader | With RadioHeader |
 |-----------|---------------------|------------------|
 | **Cross-project experience** | Each project is an island | Experience from 12+ projects flows to wherever it's needed |
-| **Enforce memory usage** | Agent searches, finds results, ignores them | Search → Apply → Trace: finding but not using is explicitly prohibited |
+| **Use relevant memory** | Useful past experience is easy to miss | Search → Apply → Trace: verify relevance, cite the source, apply matching lessons |
 | **Learn from articles** | Copy-paste into prompts | `radioheader learn <url>` extracts and distills into searchable entries |
 | **Agent calibration** | Agent treats every user the same | Context digest: knows your project landscape, strengths, known weaknesses |
 | **Community knowledge** | Start from zero | Opt-in shared library with Stigmergy quality governance |
@@ -91,7 +91,7 @@ RadioHeader (~/.claude/radioheader/)
 Human memory compresses during sleep: episodes fade, but patterns solidify. RadioHeader's `consolidate` does the same:
 
 ```
-Memory syncs accumulate → every 5 syncs, consolidate runs automatically
+Memory syncs accumulate → every 5 writes (Claude) / changed turns (Codex), consolidate runs automatically
                                     ↓
                   Analyzes search logs + project activity + user profile
                                     ↓
@@ -102,7 +102,7 @@ Memory syncs accumulate → every 5 syncs, consolidate runs automatically
 
 The digest tells the Agent, before any code is read: problem-solving style, project landscape, recent focus areas, technology overlaps, known weaknesses. Not search optimization — **Agent calibration**.
 
-When [RadioMind](https://github.com/ZaptainZ/radiomind) is installed, consolidation auto-upgrades to dream refinement (SHY pruning + DMN wandering).
+Native background refresh is enabled by default (`auto_digest`). RadioMind background calls require `radiomind_auto: true` or `RADIOHEADER_RADIOMIND_AUTO=1`; an explicit `0` disables them. Foreground `consolidate` can delegate to RadioMind; use `consolidate --native` for local-only work. `search_hits` is a rolling 30-day count, recomputed on each consolidation.
 
 </details>
 
@@ -156,7 +156,7 @@ RadioHeader ships a single data layer with **runtime adapters** that plug into w
 | Echo trigger | `PostToolUse Write\|Edit` | `UserPromptSubmit` snapshot + `Stop` diff | — |
 | Per-project scaffold | `.claude/settings.json` | `.codex/hooks.json` | — |
 
-The Codex adapter uses a **snapshot + diff** loop: `UserPromptSubmit` fingerprints memory/topics/shortwave before each turn; `Stop` diffs against that fingerprint and uses `decision: block` with a continuation prompt if any step in the Echo chain was skipped.
+The Codex adapter uses a **snapshot + diff** loop (including edits made through `apply_patch` or shell commands): `UserPromptSubmit` fingerprints memory/topics/shortwave before each turn; `Stop` diffs against that fingerprint and uses `decision: block` with a continuation prompt if any step in the Echo chain was skipped.
 
 Python hooks target **Python 3.7+** (`from __future__ import annotations`). Snapshot walker caps at 10k files with 24h TTL cleanup.
 
@@ -179,6 +179,21 @@ That's it. Start Claude Code or Codex in any project — hooks fire, rules are l
 ```
 
 Optionally, run `radioheader init` inside a project for per-project scaffolding (Echo rules, log directory, doc templates).
+
+## Maintenance
+
+For an unattended reinstall to your user bin directory (preserves community settings):
+
+```bash
+./install.sh --runtime both --yes --bin-dir "$HOME/bin"
+radioheader doctor
+radioheader index --rebuild  # rebuild derived search data if needed
+radioheader consolidate --native
+```
+
+Version 2.4.1 adds Codex native digest refresh every five changed memory turns, refreshes generated device-sync adapters during reinstall without changing sync preferences, and repairs incremental FTS updates, separates local/community IDs, restores registry backups, fixes Codex memory paths and background opt-in, and removes author-specific template paths. `doctor` checks FTS integrity on a read-only snapshot and exits nonzero when issues are found.
+
+Run the local suite with `python3 -m unittest discover -s tests -p 'test_maintenance.py'`, `python3 tests/test_digest_quality.py`, `bash tests/test_auto_digest.sh`, and `bash tests/test_device_sync.sh`.
 
 ## Use
 
@@ -252,10 +267,8 @@ radioheader device-sync join git@github.com:you/radioheader-vault.git
 
 Append-mostly files (`topics/`, `shortwave/`, `INDEX.md`) merge with git's
 union driver, so two machines editing the same file both survive. Real
-conflicts never block or lose work — the sync defers and `device-sync status` /
-`doctor` tell you how to resolve. Derived files (`search.db`,
-`context-digest.md`, registries) stay machine-local and are rebuilt after each
-pull.
+conflicts preserve both commit histories — the sync defers and `device-sync status` /
+`doctor` tell you how to resolve. The search index is rebuilt after incoming changes. The digest and readable registry are local derived views. **`project-registry.json` is machine-local source data**: sync preserves a validated `.project-registry.backup.json` before pulling. Native consolidation can restore that backup; without a valid source or backup it reports an error and preserves existing views. Session snapshots also stay machine-local.
 
 **Project memories** (`~/.claude/projects/*/memory/`) can hold real secrets, so
 they only sync encrypted — opt-in:
@@ -277,7 +290,7 @@ via tombstones, and a file recreated after deletion wins. Disable anytime with
 
 [RadioMind](https://github.com/ZaptainZ/radiomind) is a bionic memory core for AI agents — it distills scattered conversations into deep habits through three-body debate and dream refinement, then serves them back when they matter. RadioHeader captures and enforces; RadioMind refines and deepens.
 
-When RadioMind is installed, RadioHeader **automatically upgrades itself** — no config needed:
+Foreground commands detect RadioMind on PATH; background automation is separately opt-in:
 
 | Command | Without RadioMind | With RadioMind |
 |---------|-------------------|----------------|
@@ -329,11 +342,11 @@ When enabled, search results blend three sources with clear priority:
 
 Built through real usage across 13 projects. Four lessons that shaped everything:
 
-**"Searched but didn't use" — the #1 failure mode.** Claude would search, find results, and ignore them. The fix: three mandatory steps (Search → Apply → Trace) with an explicit prohibition on finding but not using.
+**"Searched but didn't use" — the #1 failure mode.** Claude would search, find results, and ignore them. The early fix used mandatory steps. Current templates use symptom-based search signals and require verification and citation when applying a match.
 
 **Symptom keywords > solution keywords.** Developers search "white screen" and "slow launch", not "Task.detached". Every entry must preserve the words someone would actually search for.
 
-**Instructions beat knowledge.** Writing "experience is stored here" doesn't drive behavior. Writing "you MUST search here first" does. `CLAUDE.md` / `AGENTS.md` content must be imperative behavioral rules, not reference documentation.
+**Instructions beat knowledge.** Writing "experience is stored here" doesn't drive behavior. Actionable guidance about when to search, how to verify a match, and where to record new experience makes the memory useful.
 
 **Attention belongs in compression, not retrieval.** Attention-weighted search ranking added zero value — BM25 already gets the right results. The real value is in memory consolidation: compressing the user's project landscape into a digest that shapes how the Agent thinks.
 

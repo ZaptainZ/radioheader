@@ -54,6 +54,14 @@ check "search.db not tracked"               "! git -C '$HOME_A/.claude/radiohead
 check "project-registry.json not tracked"   "! git -C '$HOME_A/.claude/radioheader' ls-files | grep -q project-registry.json"
 check "identity fallback lets commits work" "git -C '$HOME_A/.claude/radioheader' log -1 >/dev/null 2>&1"
 
+echo "== reinstall refresh keeps sync state and avoids remote writes =="
+REFRESH_HEAD=$(git -C "$VAULT" rev-parse HEAD)
+rh "$HOME_A" device-sync refresh
+check "refresh retains enabled sync" "grep -q '\"device_sync_enabled\": true' '$HOME_A/.claude/radioheader/config.json'"
+check "refresh does not push" "[ \"\$(git -C '$VAULT' rev-parse HEAD)\" = '$REFRESH_HEAD' ]"
+check "Codex counter excluded from sync" "git -C '$HOME_A/.claude/radioheader' check-ignore -q .codex-consolidate-counter"
+check "Codex log excluded from sync" "git -C '$HOME_A/.claude/radioheader' check-ignore -q .codex-consolidate.log"
+
 echo "== machine B: join (with pre-existing local data) =="
 mk_home "$HOME_B"
 printf '# local B knowledge\n' > "$HOME_B/.claude/radioheader/topics/local-b.md"
@@ -94,6 +102,10 @@ git init --bare --quiet "$VAULT2"
 mk_home "$HOME_C"
 printf 'old knowledge\n' > "$HOME_C/.claude/radioheader/topics/old.md"
 printf 'sqlite-junk' > "$HOME_C/.claude/radioheader/search.db"
+printf '{"projects":[{"name":"RetainedCard"}]}\n' > "$HOME_C/.claude/radioheader/project-registry.json"
+mkdir -p "$HOME_C/.claude/radioheader/.codex-turn-snapshots"
+printf '{}\n' > "$HOME_C/.claude/radioheader/.codex-turn-snapshots/old.json"
+
 (
   cd "$HOME_C/.claude/radioheader"
   git init --quiet
@@ -105,6 +117,24 @@ rh "$HOME_C" device-sync init --remote "file://$VAULT2" > "$WORK/init-c.log" 2>&
 check "upgrade untracked search.db"        "! git -C '$HOME_C/.claude/radioheader' ls-files | grep -q search.db"
 check "search.db still on disk"            "[ -f '$HOME_C/.claude/radioheader/search.db' ]"
 check "knowledge stayed tracked"           "git -C '$HOME_C/.claude/radioheader' ls-files | grep -q topics/old.md"
+check "source registry backed up before untrack" "grep -q RetainedCard '$HOME_C/.claude/radioheader/.project-registry.backup.json'"
+check "session snapshots untracked" "! git -C '$HOME_C/.claude/radioheader' ls-files | grep -q codex-turn-snapshots"
+check "registry backup stays local" "! git -C '$HOME_C/.claude/radioheader' ls-files | grep -q project-registry"
+
+
+echo "== incoming legacy untrack preserves registry source =="
+# Simulate an older device temporarily tracking the machine-local source.
+git -C "$HOME_A/.claude/radioheader" add -f project-registry.json
+git -C "$HOME_A/.claude/radioheader" commit -qm "legacy tracked registry"
+hook "$HOME_A" push
+hook "$HOME_B" push
+check "legacy tracked registry arrived on B" "[ -f '$HOME_B/.claude/radioheader/project-registry.json' ]"
+git -C "$HOME_A/.claude/radioheader" rm -q --cached project-registry.json
+git -C "$HOME_A/.claude/radioheader" commit -qm "untrack local source"
+hook "$HOME_A" push
+hook "$HOME_B" push
+check "incoming untrack did not erase B's project registry" "[ -f '$HOME_B/.claude/radioheader/project-registry.json' ]"
+check "B source restored from matching backup" "cmp -s '$HOME_B/.claude/radioheader/project-registry.json' '$HOME_B/.claude/radioheader/.project-registry.backup.json'"
 
 echo "== off: hooks unregistered, repo kept, hook inert =="
 rh "$HOME_A" device-sync off > /dev/null 2>&1

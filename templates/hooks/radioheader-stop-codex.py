@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,8 +34,13 @@ EXCLUDED_DIRS = {
 
 
 def project_memory_dir(cwd: Path) -> Path:
-    slug = "-" + str(cwd.resolve()).replace("/", "-")
-    return Path.home() / ".claude" / "projects" / slug / "memory"
+    path = str(cwd.resolve())
+    projects = Path.home() / ".claude" / "projects"
+    canonical = projects / re.sub(r"[^a-zA-Z0-9_-]", "-", path) / "memory"
+    if canonical.exists():
+        return canonical
+    legacy = projects / ("-" + path.replace("/", "-")) / "memory"
+    return legacy if legacy.exists() else canonical
 
 
 def discover_doc_dir(cwd: Path) -> Path | None:
@@ -154,7 +161,65 @@ def summarize_paths(paths, cwd: Path, limit: int = 3) -> str:
     return ", ".join(preview)
 
 
+def radiomind_auto_enabled() -> bool:
+    value = os.environ.get("RADIOHEADER_RADIOMIND_AUTO", "").lower()
+    if value:
+        return value in {"1", "true", "yes", "on"}
+    try:
+        config = json.loads((RADIOHEADER_DIR / "config.json").read_text())
+        return config.get("radiomind_auto") is True
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def auto_digest_enabled() -> bool:
+    if os.environ.get("RADIOHEADER_AUTO_DIGEST", "").lower() in {"0", "false", "no", "off"}:
+        return False
+    try:
+        config = json.loads((RADIOHEADER_DIR / "config.json").read_text())
+        return config.get("auto_digest") is not False
+    except (OSError, ValueError, AttributeError):
+        return True
+
+
+def refresh_digest():
+    """Count changed turns, independently of Claude's per-write counter.
+
+    Hold a lock through increment/spawn so simultaneous sessions cannot lose
+    counts. A missing executable or failed spawn retains the due count.
+    Native consolidation has its own lock and reports failures to this log.
+    """
+    if not (auto_digest_enabled() or radiomind_auto_enabled()):
+        return
+    try:
+        RADIOHEADER_DIR.mkdir(parents=True, exist_ok=True)
+        counter = RADIOHEADER_DIR / ".codex-consolidate-counter"
+        with counter.open("a+") as stream:
+            fcntl.flock(stream, fcntl.LOCK_EX)
+            stream.seek(0)
+            try:
+                count = max(0, int(stream.read().strip())) + 1
+            except ValueError:
+                count = 1
+            command = shutil.which("radioheader")
+            if count >= 5 and command:
+                args = [command, "consolidate"]
+                if not radiomind_auto_enabled():
+                    args.append("--native")
+                with (RADIOHEADER_DIR / ".codex-consolidate.log").open("a") as log:
+                    subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=log,
+                                     stderr=log, start_new_session=True)
+                count = 0
+            stream.seek(0)
+            stream.truncate()
+            stream.write(str(count) + "\n")
+    except OSError:
+        # Maintenance must never break a user's Stop response.
+        pass
+
+
 def main():
+    os.environ["PATH"] = str(Path.home() / "bin") + os.pathsep + str(Path.home() / ".local/bin") + os.pathsep + os.environ.get("PATH", "")
     payload = json.load(os.fdopen(0))
     session_id = payload.get("session_id", "unknown")
     turn_id = payload.get("turn_id", "unknown")
@@ -229,7 +294,12 @@ def main():
     ]
 
     if snapshot_path.exists():
-        snapshot_path.unlink(missing_ok=True)
+        snapshot_path.unlink()
+
+    # Run before Echo continuation: even a turn which needs another pass
+    # changed memory. Consuming its snapshot prevents duplicate counting.
+    if memory_changes or topic_changes or shortwave_changes:
+        refresh_digest()
 
     follow_up = []
     messages = []
@@ -286,7 +356,7 @@ def main():
         messages.append("If you used community entries, evaluate causal contribution and append votes.")
 
     # --- RadioMind ingest: feed changed memory/topic/shortwave content ---
-    if shutil.which("radiomind"):
+    if radiomind_auto_enabled() and shutil.which("radiomind"):
         ingest_paths = memory_changes + topic_changes + shortwave_changes
         for p in ingest_paths[:5]:
             try:

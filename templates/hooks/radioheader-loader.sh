@@ -19,18 +19,16 @@ if [ -d "$RADIOHEADER_DIR/topics" ]; then
     echo "  Holds:  ${SHORTWAVE_COUNT} shortwave entries + ${TOPIC_COUNT} topic files from ${PROJECT_COUNT} projects you've worked on"
     echo "  Query:  radioheader search \"<symptom>\"   — FTS5 + 中英同义词扩展 (白屏 ↔ blank screen)"
     echo "  Tip:    symptom words (白屏/闪退/错位/丢失/慢), not action words; for multi-symptom use OR: \"白屏|闪退\""
-    echo "          spaces = AND-strict (usually miss); Chinese hits more than English; no stemming"
+    echo "          spaces = phrase match (usually miss); Chinese hits more than English; no stemming"
     echo "  Index:  $RADIOHEADER_DIR/INDEX.md"
     echo ""
   fi
 fi
 
 # --- Self-heal: rebuild missing derived files (native, pure-local) ---
-# project-registry.json / context-digest.md are machine-local (gitignored by
-# device-sync), so a pull that propagates their untrack commit deletes the
-# working copy — and nothing recreates them while auto-consolidate is gated
-# off. Rebuild them here via the native path only (no RadioMind, no LLM, no
-# network), which keeps this outside the radiomind_auto authorization gate.
+# The registry is machine-local SOURCE data: native consolidate can recover
+# it only from its validated backup. The digest is a derived view. Missing
+# source + missing backup is reported, never silently replaced by empty cards.
 # Default ON (pure-local, zero external side effects). Disable via either:
 #   • ~/.claude/radioheader/config.json :  "auto_digest": false
 #   • environment:                         RADIOHEADER_AUTO_DIGEST=0
@@ -52,8 +50,8 @@ if auto_digest_enabled && command -v radioheader >/dev/null 2>&1; then
     now_ts=$(date +%s)
     if [ $(( now_ts - marker_ts )) -ge 300 ]; then
       echo "$now_ts" > "$REBUILD_MARKER" 2>/dev/null || true
-      radioheader consolidate --native >/dev/null 2>&1 &
-      echo "RadioHeader: derived files missing (registry/digest) — rebuilding natively in background (next session will have them)."
+      radioheader consolidate --native >"$RADIOHEADER_DIR/.registry-recovery.log" 2>&1 &
+      echo "RadioHeader: derived files missing (registry/digest) — rebuilding natively in background; failures are recorded in .registry-recovery.log."
     fi
   fi
 fi

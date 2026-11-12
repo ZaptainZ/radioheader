@@ -69,7 +69,7 @@ Plain Markdown files organized by technology or domain. Each entry is one line:
 **Index and registry**
 
 - `INDEX.md` — Lists all topic files with entry counts
-- `project-registry.json` — Structured source of truth for project paths and metadata
+- `project-registry.json` — Machine-local source of truth for project paths and metadata; `.project-registry.backup.json` is a validated recovery copy, never synced. Missing source without a valid backup is an error, not an empty registry.
 - `project-registry.md` — Human-readable projection generated from the JSON registry
 
 ### Per-Project Structure
@@ -150,3 +150,11 @@ In Claude, this reminder is a plain Stop message. In Codex, the Stop hook can al
 - **No version control**: Topic files are plain text; use git if you want history
 - **No mandatory cloud sync**: Everything works locally under `~/.claude/` and runtime config files
 - **No model fine-tuning**: RadioHeader works through prompting and behavioral rules, not training
+
+### Codex digest refresh and runtime verification
+
+Codex counts turns with actual changes to project memory, global topics, or shortwave entries. Every five changed turns the Stop adapter starts consolidation; Claude counts five matching Write/Edit events instead. The counters are deliberately separate because their events have different granularity. Codex protects its counter with a file lock, consumes each snapshot once, and refreshes before an Echo continuation. The default command is `consolidate --native`; only explicit `radiomind_auto` opt-in permits delegation. `auto_digest: false` or `RADIOHEADER_AUTO_DIGEST=0` disables the native automation. Failures from the background process are recorded in `.codex-consolidate.log`.
+
+Reinstalling refreshes generated device-sync adapters and local ignore metadata via `device-sync refresh`. This operation does not contact the remote or enable disabled sync. The next normal sync handles updated metadata.
+
+Codex requires review of new or changed hook definitions through `/hooks`; installing hook files alone does not establish trust. Current Codex also supports `apply_patch` PostToolUse events, but the snapshot adapter continues to cover file edits regardless of tool choice. See [official Codex hooks documentation](https://learn.chatgpt.com/docs/hooks). Regression tests exercise protocol fixtures; real-client acceptance must separately verify that hooks actually run and that model authentication is available.

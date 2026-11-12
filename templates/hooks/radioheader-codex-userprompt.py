@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 
@@ -38,8 +39,13 @@ EXCLUDED_DIRS = {
 
 
 def project_memory_dir(cwd: Path) -> Path:
-    slug = "-" + str(cwd.resolve()).replace("/", "-")
-    return Path.home() / ".claude" / "projects" / slug / "memory"
+    path = str(cwd.resolve())
+    projects = Path.home() / ".claude" / "projects"
+    canonical = projects / re.sub(r"[^a-zA-Z0-9_-]", "-", path) / "memory"
+    if canonical.exists():
+        return canonical
+    legacy = projects / ("-" + path.replace("/", "-")) / "memory"
+    return legacy if legacy.exists() else canonical
 
 
 def discover_doc_dir(cwd: Path) -> Path | None:

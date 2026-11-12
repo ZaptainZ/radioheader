@@ -28,7 +28,7 @@ RadioHeader 用三个机制解决这个问题：
 | 机制 | 做什么 |
 |------|--------|
 | **Echo（回波）** | 任务完成后，经验通过 hooks 自动从项目流回全局记忆中枢 |
-| **搜 → 用 → 追** | 注入 `CLAUDE.md` / `AGENTS.md` 的强制行为规则。Agent **必须**先搜再分析，**必须**引用搜到的结果，搜到不用是被**明确禁止**的 |
+| **搜 → 用 → 追** | 注入 `CLAUDE.md` / `AGENTS.md` 的检索指引：按症状判断是否值得搜索，核验命中是否适用，引用后应用，必要时追溯来源 |
 | **Shortwave（短波）** | 从经验条目中剥离项目名、文件路径、框架细节，产出跨技术栈可搜索的通用知识单元 |
 
 效果：任何项目的任何 Agent 第二次碰到同类问题时，答案已经在那里了。
@@ -38,7 +38,7 @@ RadioHeader 用三个机制解决这个问题：
 | 能力 | 没有 RadioHeader | 有 RadioHeader |
 |------|-----------------|---------------|
 | **跨项目经验** | 每个项目是孤岛 | 12+ 项目的经验流向需要它的地方 |
-| **强制使用记忆** | Agent 搜到结果但跳过不用 | 搜→用→追：搜到不用被明确禁止 |
+| **复用相关记忆** | 过去的经验容易被遗漏 | 搜→用→追：核验适用性、引用来源、应用相关经验 |
 | **从文章学习** | 复制粘贴到 prompt | `radioheader learn <url>` 自动提取、精炼为可搜索条目 |
 | **Agent 校准** | Agent 对每个用户一视同仁 | 环境认知摘要：知道你的项目全景、长处、已知短板 |
 | **社区知识** | 从零开始 | 可选的共享库，Stigmergy 信息素质量治理 |
@@ -91,7 +91,7 @@ RadioHeader (~/.claude/radioheader/)
 人类的记忆在睡眠中压缩：情节淡去，模式固化。RadioHeader 的 `consolidate` 做同样的事：
 
 ```
-记忆同步累积 → 每 5 次自动运行 consolidate
+记忆同步累积 → CC 每 5 次写入 / Codex 每 5 个有变化的回合自动 consolidate
                         ↓
         分析搜索日志 + 项目活跃度 + 用户画像
                         ↓
@@ -102,7 +102,7 @@ RadioHeader (~/.claude/radioheader/)
 
 摘要在任何代码被读取之前告诉 Agent：解题风格、项目全景、近期关注、技术交叉、已知短板。不是搜索优化——是 **Agent 校准**。
 
-安装了 [RadioMind](https://github.com/ZaptainZ/radiomind) 时，consolidate 自动升级为 dream 精炼（SHY 修剪 + DMN 漫游）。
+本地后台刷新由默认开启的 `auto_digest` 控制。RadioMind 后台调用需显式设置 `radiomind_auto: true` 或 `RADIOHEADER_RADIOMIND_AUTO=1`；环境变量 `0` 可明确关闭。前台 `consolidate` 可委托 RadioMind，`consolidate --native` 始终只做本地处理。`search_hits` 表示最近 30 天命中数，每次重算，避免重复累计。
 
 </details>
 
@@ -156,7 +156,7 @@ RadioHeader 的数据层只有一份，上层通过**运行时适配器**对接�
 | Echo 触发 | `PostToolUse Write\|Edit` | `UserPromptSubmit` 快照 + `Stop` diff | — |
 | 项目脚手架 | `.claude/settings.json` | `.codex/hooks.json` | — |
 
-Codex 侧采用**快照 + 差分**闭环：`UserPromptSubmit` 在每个 turn 前对 memory/topics/shortwave 做指纹；`Stop` 时 diff，发现 Echo 链有缺位就用 `decision: block` + continuation prompt 补齐。
+Codex 侧采用**快照 + 差分**闭环（涵盖 `apply_patch` 和 shell 写入）：`UserPromptSubmit` 在每个 turn 前对 memory/topics/shortwave 做指纹；`Stop` 时 diff，发现 Echo 链有缺位就用 `decision: block` + continuation prompt 补齐。
 
 Python hooks 目标 **Python 3.7+**（`from __future__ import annotations`）。仓库遍历上限 10k 文件，24 小时 TTL 自动清理陈旧快照。
 
@@ -179,6 +179,21 @@ cd radioheader
 ```
 
 可选：在项目中运行 `radioheader init` 添加项目级脚手架（Echo 规则、日志目录、文档模板）。
+
+## 维护
+
+无人值守重装到用户目录（保留既有社区开关）：
+
+```bash
+./install.sh --runtime both --yes --bin-dir "$HOME/bin"
+radioheader doctor
+radioheader index --rebuild  # 按需重建派生索引
+radioheader consolidate --native
+```
+
+2.4.1 新增 Codex 每 5 个记忆变化回合自动刷新本地摘要；重装时刷新设备同步脚本，保留同步开关。修复增量 FTS 一致性、本地/社区 ID 冲突、注册表备份恢复、Codex 记忆路径与后台门控、模板个人路径。`doctor` 用只读快照核验 FTS，有问题时返回非零退出码。
+
+回归测试：`python3 -m unittest discover -s tests -p 'test_maintenance.py'`、`python3 tests/test_digest_quality.py`、`bash tests/test_auto_digest.sh`、`bash tests/test_device_sync.sh`。
 
 ## 使用
 
@@ -248,9 +263,8 @@ radioheader device-sync join git@github.com:you/radioheader-vault.git
 ```
 
 追加型文件（`topics/`、`shortwave/`、`INDEX.md`）用 git union 合并——两台机器同时
-改同一个文件，双方内容都保留。真冲突永不阻塞也不丢数据：同步自动推迟，
-`device-sync status` / `doctor` 会告诉你如何解决。派生文件（`search.db`、
-`context-digest.md`、registry）保持机器本地，每次 pull 后自动重建。
+改同一个文件，双方内容都保留。真实冲突会保留双方提交历史：同步自动推迟，
+`device-sync status` / `doctor` 会告诉你如何解决。收到变更后刷新搜索索引；digest 与 registry.md 是机器本地派生视图。**`project-registry.json` 是机器本地真源**：同步前保存有效的 `.project-registry.backup.json`。native consolidate 可从备份恢复；真源与备份均不可用时明确报错，不会以空表覆盖项目名片。会话快照也不参与同步。
 
 **项目记忆**（`~/.claude/projects/*/memory/`）可能含真实机密，只以加密形式同步——
 需显式开启：
@@ -271,7 +285,7 @@ vault 传递；删除通过墓碑标记跨机传播，删除后重建的文件�
 
 [RadioMind](https://github.com/ZaptainZ/radiomind) 是 AI Agent 的仿生记忆核心——它通过三体辩论和做梦修剪把零散对话提炼为深层习惯，在需要的时候把它们送回来。RadioHeader 负责捕获和行为强制，RadioMind 负责精炼和深化。
 
-安装了 RadioMind 后，RadioHeader **自动升级自身**——不需要任何配置：
+前台命令会检测 PATH 中的 RadioMind；后台自动调用须另外显式开启：
 
 | 命令 | 没有 RadioMind | 有 RadioMind |
 |------|--------------|-------------|
@@ -323,11 +337,11 @@ radioheader publish <文件>         # 发布（质量 ≥6/8 + 隐私 + 去重�
 
 跨 13 个项目的真实使用总结出的四条经验：
 
-**"搜到但没用"——头号失败模式。** Claude 搜到了结果，但完全跳过不用。修复：三步强制规则（搜→用→追）+ 明确禁止搜到不用。
+**"搜到但没用"——头号失败模式。** Claude 搜到了结果，但完全跳过不用。早期通过三步强制规则改善；当前模板已调整为按症状判断检索价值，应用时核验适用性并引用来源。
 
 **症状关键词 > 解法关键词。** 开发者搜的是"白屏"、"启动慢"，不是"Task.detached"。每条经验必须保留用户实际会搜索的词。
 
-**指令胜过知识。** 写"经验存在这里"不会驱动行为，写"你必须先搜这里"才会。`CLAUDE.md` / `AGENTS.md` 的内容必须是强制行为指令，不是参考文档。
+**指令胜过知识。** 写"经验存在这里"不会驱动行为，明确何时搜索、怎样核验命中、到哪里记录新经验，才能让知识库发挥作用。
 
 **注意力属于记忆压缩，不属于搜索。** 注意力加权排序变化为零——BM25 已经给出了正确结果。注意力真正的价值在于记忆整合：把用户的项目全景压缩成 Agent 的思维底色。
 

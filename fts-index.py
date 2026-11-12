@@ -137,6 +137,33 @@ def parse_topic(filepath: Path) -> list[dict]:
     return entries
 
 
+def untagged_topic_lines(text: str) -> list[int]:
+    """A list may inherit a source from its heading or introductory paragraph."""
+    source = re.compile(r"\[(?:source|来源):[^\]]+\]", re.IGNORECASE)
+    headings = {}
+    paragraph_source = False
+    fenced = False
+    missing = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        heading = re.match(r"^(#{1,6})\s", line)
+        if heading:
+            level = len(heading.group(1))
+            headings = {k: v for k, v in headings.items() if k < level}
+            headings[level] = bool(source.search(line))
+            paragraph_source = False
+        elif line.startswith("- "):
+            if not (source.search(line) or paragraph_source or any(headings.values())):
+                missing.append(number)
+        elif line.strip() and not line[0].isspace():
+            paragraph_source = bool(source.search(line))
+    return missing
+
+
 # ============================================================
 # Synonym table: Chinese ↔ English mapping
 # ============================================================
@@ -249,10 +276,16 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
 
+    # v2 keys entries by source + id. Old indexes may also contain stale FTS
+    # postings from the former update implementation; rebuild from Markdown.
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 2:
+        for table in ("entries_fts", "entries", "file_index"):
+            conn.execute("DROP TABLE IF EXISTS " + table)
+
     # Main entries table (regular, for metadata)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS entries (
-            id TEXT PRIMARY KEY,
+            id TEXT NOT NULL,
             source TEXT,
             domain TEXT,
             tags TEXT,
@@ -265,7 +298,8 @@ def init_db(db_path: str) -> sqlite3.Connection:
             body TEXT,
             file_path TEXT,
             file_hash TEXT,
-            projects TEXT DEFAULT ''
+            projects TEXT DEFAULT '',
+            PRIMARY KEY (source, id)
         )
     """)
 
@@ -306,8 +340,25 @@ def init_db(db_path: str) -> sqlite3.Connection:
         )
     """)
 
+    conn.execute("PRAGMA user_version=2")
     conn.commit()
     return conn
+
+
+def delete_file_entries(conn: sqlite3.Connection, file_path: str):
+    """Remove postings using OLD content, including sections no longer present."""
+    rows = conn.execute(
+        "SELECT rowid, id, domain, tags, title, symptom, fix, context, cause, body "
+        "FROM entries WHERE file_path = ?", (file_path,)
+    ).fetchall()
+    for row in rows:
+        conn.execute("""
+            INSERT INTO entries_fts(entries_fts, rowid, id, domain, tags, title,
+                                    symptom, fix, context, cause, body)
+            VALUES('delete', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, row)
+    conn.execute("DELETE FROM entries WHERE file_path = ?", (file_path,))
+    return len(rows)
 
 
 def upsert_entry(conn: sqlite3.Connection, entry: dict, file_path: str, fhash: str):
@@ -315,25 +366,29 @@ def upsert_entry(conn: sqlite3.Connection, entry: dict, file_path: str, fhash: s
     projects = entry.get("projects", "")
 
     # Check if entry exists and get rowid
-    row = conn.execute("SELECT rowid FROM entries WHERE id = ?", (entry["id"],)).fetchone()
+    row = conn.execute(
+        "SELECT rowid, id, domain, tags, title, symptom, fix, context, cause, body, file_path "
+        "FROM entries WHERE source = ? AND id = ?", (entry["source"], entry["id"])
+    ).fetchone()
 
     if row:
+        if row[-1] != file_path:
+            raise ValueError("Duplicate entry id within source: " + entry["id"])
         rowid = row[0]
         # Delete old FTS entry
         conn.execute("""
             INSERT INTO entries_fts(entries_fts, rowid, id, domain, tags, title, symptom, fix, context, cause, body)
             VALUES('delete', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (rowid, entry["id"], entry["domain"], entry["tags"], entry["title"],
-              entry["symptom"], entry["fix"], entry["context"], entry["cause"], entry["body"]))
+        """, row[:-1])
 
         # Update entries table
         conn.execute("""
             UPDATE entries SET source=?, domain=?, tags=?, refs=?, title=?,
                    symptom=?, fix=?, context=?, cause=?, body=?, file_path=?, file_hash=?, projects=?
-            WHERE id=?
+            WHERE source=? AND id=?
         """, (entry["source"], entry["domain"], entry["tags"], entry["refs"], entry["title"],
               entry["symptom"], entry["fix"], entry["context"], entry["cause"], entry["body"],
-              file_path, fhash, projects, entry["id"]))
+              file_path, fhash, projects, entry["source"], entry["id"]))
     else:
         conn.execute("""
             INSERT INTO entries (id, source, domain, tags, refs, title, symptom, fix, context, cause, body, file_path, file_hash, projects)
@@ -343,7 +398,8 @@ def upsert_entry(conn: sqlite3.Connection, entry: dict, file_path: str, fhash: s
               entry["body"], file_path, fhash, projects))
 
     # Get new rowid and insert into FTS
-    rowid = conn.execute("SELECT rowid FROM entries WHERE id = ?", (entry["id"],)).fetchone()[0]
+    rowid = conn.execute("SELECT rowid FROM entries WHERE source = ? AND id = ?",
+                         (entry["source"], entry["id"])).fetchone()[0]
     conn.execute("""
         INSERT INTO entries_fts(rowid, id, domain, tags, title, symptom, fix, context, cause, body)
         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -358,7 +414,18 @@ def populate_synonyms(conn: sqlite3.Connection):
     for term, syns in syn_map.items():
         for syn in syns:
             conn.execute("INSERT OR IGNORE INTO synonyms (term, synonym) VALUES (?, ?)", (term, syn))
-    conn.commit()
+
+
+def check_index(db_path: str):
+    """Check a consistent in-memory snapshot; never write to the user's DB."""
+    source = sqlite3.connect(Path(db_path).resolve().as_uri() + "?mode=ro", uri=True)
+    copy = sqlite3.connect(":memory:")
+    try:
+        source.backup(copy)
+        copy.execute("INSERT INTO entries_fts(entries_fts, rank) VALUES('integrity-check', 1)")
+    finally:
+        source.close()
+        copy.close()
 
 
 def build_index(radioheader_dir: str, db_path: str, rebuild: bool = False):
@@ -396,7 +463,12 @@ def build_index(radioheader_dir: str, db_path: str, rebuild: bool = False):
     total_skipped = 0
     total_removed = 0
 
-    # Track all current file paths
+    # Remove vanished files before processing renames that keep the same id.
+    planned_files = {str(p) for _, directory in scan_dirs for p in directory.glob("*.md")}
+    for (old_path,) in conn.execute("SELECT file_path FROM file_index").fetchall():
+        if old_path not in planned_files:
+            total_removed += delete_file_entries(conn, old_path)
+            conn.execute("DELETE FROM file_index WHERE file_path = ?", (old_path,))
     current_files = set()
 
     for source, directory in scan_dirs:
@@ -410,10 +482,15 @@ def build_index(radioheader_dir: str, db_path: str, rebuild: bool = False):
                 "SELECT file_hash FROM file_index WHERE file_path = ?", (fpath,)
             ).fetchone()
             if existing and existing[0] == fhash and not rebuild:
+                for rowid, domain in conn.execute(
+                        "SELECT rowid, domain FROM entries WHERE file_path = ?", (fpath,)).fetchall():
+                    conn.execute("UPDATE entries SET projects = ? WHERE rowid = ?",
+                                 (resolve_projects(domain, domain_index), rowid))
                 total_skipped += 1
                 continue
 
             # Parse and index
+            total_removed += delete_file_entries(conn, fpath)
             if source == "topic":
                 entries = parse_topic(md_file)
                 for entry in entries:
@@ -439,23 +516,13 @@ def build_index(radioheader_dir: str, db_path: str, rebuild: bool = False):
     for (fpath,) in tracked_files:
         if fpath not in current_files:
             # Remove entries from this file
-            entries_to_remove = conn.execute(
-                "SELECT rowid, id, domain, tags, title, symptom, fix, context, cause, body FROM entries WHERE file_path = ?",
-                (fpath,)
-            ).fetchall()
-            for row in entries_to_remove:
-                rowid = row[0]
-                conn.execute("""
-                    INSERT INTO entries_fts(entries_fts, rowid, id, domain, tags, title, symptom, fix, context, cause, body)
-                    VALUES('delete', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (rowid,) + row[1:])
-                conn.execute("DELETE FROM entries WHERE rowid = ?", (rowid,))
-                total_removed += 1
+            total_removed += delete_file_entries(conn, fpath)
             conn.execute("DELETE FROM file_index WHERE file_path = ?", (fpath,))
 
     # Populate synonyms
     populate_synonyms(conn)
 
+    conn.execute("INSERT INTO entries_fts(entries_fts, rank) VALUES('integrity-check', 1)")
     conn.commit()
 
     # Stats
@@ -475,9 +542,22 @@ if __name__ == "__main__":
     parser.add_argument("--db", default=None, help="Database path")
     parser.add_argument("--radioheader-dir", default=None, help="RadioHeader directory")
     parser.add_argument("--rebuild", action="store_true", help="Force full rebuild")
+    parser.add_argument("--check", action="store_true", help="Check FTS integrity without modifying the index")
+    parser.add_argument("--check-topics", action="store_true", help="Count topic bullets without a direct or inherited source")
     args = parser.parse_args()
 
     rdir = args.radioheader_dir or get_radioheader_dir()
     db = args.db or os.path.join(rdir, "search.db")
 
-    build_index(rdir, db, rebuild=args.rebuild)
+    if args.check_topics:
+        print(sum(len(untagged_topic_lines(p.read_text(encoding="utf-8")))
+                  for p in (Path(rdir) / "topics").glob("*.md")))
+    elif args.check:
+        try:
+            check_index(db)
+            print("FTS index integrity OK")
+        except sqlite3.Error as exc:
+            print("FTS index check failed: " + str(exc), file=sys.stderr)
+            sys.exit(1)
+    else:
+        build_index(rdir, db, rebuild=args.rebuild)

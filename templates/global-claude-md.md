@@ -6,7 +6,7 @@
 
 A CLI-indexed knowledge base of pitfalls and solutions accumulated across this user's past projects, located at `~/.claude/radioheader/`. Auto-loaded summary is in `context-digest.md` (injected at session start); full index at `INDEX.md`.
 
-**What's inside** (auto-indexed by `radioheader consolidate`):
+**What's inside** (search index maintained by `radioheader index`):
 - **Shortwave entries** — refined, project-agnostic experience snippets, one issue per file, with `symptoms / context / cause / fix` structure
 - **Topic files** — domain-grouped depth (`ios-swiftui.md`, `rust-systems.md`, `networking-proxy.md`, `claude-code-meta.md`, etc.)
 - **Project registry** — domains, pain points, attention weights, and source paths for every project the user works on (`project-registry.json` / `.md`)
@@ -21,7 +21,7 @@ A CLI-indexed knowledge base of pitfalls and solutions accumulated across this u
 
 **Search craft** — the difference between a useful search and a noise search:
 - Search by **symptom words** (what's broken: `白屏`, `闪退`, `错位`, `丢失`, `慢`), not action words (`reply`, `click`, `请求`) — action words match everything and surface noise
-- **Multi-symptom problems → use `|` (OR), not spaces**. `radioheader search "白屏|闪退"` runs OR with synonym expansion on both → ~18 hits. `radioheader search "白屏 闪退"` is AND-strict (both terms must appear in the same entry) → usually 0 hits. Spaces are the trap.
+- **Multi-symptom problems → use `|` (OR), not spaces**. `radioheader search "白屏|闪退"` runs OR with synonym expansion on both → ~18 hits. `radioheader search "白屏 闪退"` is a phrase match (terms must appear together in order) → usually 0 hits. Spaces are the trap.
 - **Chinese symptom words hit more often than English** — most entries are written in Chinese; an English query usually only matches via the predefined synonym table
 - **No stemming** — `searched` won't match an entry tagged `search`/`搜索`/`搜到`; if the first form misses, try a different form (Chinese ↔ English, root word, near-synonym) before giving up
 - Read the matched files. `search` returns content snippets; if you still need detail, `Read` the file
@@ -40,7 +40,7 @@ A CLI-indexed knowledge base of pitfalls and solutions accumulated across this u
 1. Did this session produce new experience? (pitfalls, architecture decisions, non-obvious behavior)
 2. If yes → update the corresponding topic file under `memory/`
 3. Key experience → also update `memory/MEMORY.md` quick reference section
-4. **Global Echo**: Is this experience useful across projects? If yes → write to `/Users/zaptain/.claude/radioheader/topics/` with format `[source:ProjectName] experience content`
+4. **Global Echo**: Is this experience useful across projects? If yes → write to `__HOME__/.claude/radioheader/topics/` with format `[source:ProjectName] experience content`
 5. **Replace outdated info, don't append endlessly**
 
 **Project documentation obligations (for projects with the dynamic experience framework):**
@@ -70,7 +70,7 @@ Tech stack, terminology mapping, and documentation directory are NOT asked upfro
 
 Then automatically create the project structure using templates from RadioHeader.
 
-**Register new project**: After enabling the framework, also register the project in `/Users/zaptain/.claude/radioheader/project-registry.json` (and keep `project-registry.md` in sync via consolidate).
+**Register new project**: After enabling the framework, also register the project in `__HOME__/.claude/radioheader/project-registry.json` (and keep `project-registry.md` in sync via consolidate).
 
 **If the user chooses not to enable**, work normally without creating extra files.
 

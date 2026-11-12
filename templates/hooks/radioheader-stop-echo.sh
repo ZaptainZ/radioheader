@@ -29,6 +29,7 @@ community_enabled() {
 radiomind_auto_enabled() {
   case "${RADIOHEADER_RADIOMIND_AUTO:-}" in
     1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
   esac
   [ -f "$CONFIG_FILE" ] && grep -Eq '"radiomind_auto"[[:space:]]*:[[:space:]]*true' "$CONFIG_FILE" 2>/dev/null
 }

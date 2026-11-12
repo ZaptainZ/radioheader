@@ -1,4 +1,4 @@
-#!/Users/zaptain/.claude/skills/web-extract/.venv/bin/python3
+#!/usr/bin/env python3
 """
 网页正文提取脚本（Scrapling + html2text）
 

@@ -14,6 +14,9 @@ Usage:
 import json
 import os
 import sys
+import tempfile
+import fcntl
+from contextlib import contextmanager
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,23 +27,44 @@ def get_radioheader_dir():
 
 
 def load_registry(rdir: str) -> dict:
-    path = os.path.join(rdir, "project-registry.json")
-    if not os.path.exists(path):
-        # Try to create it if parent dir exists
-        parent = os.path.dirname(path)
-        if os.path.isdir(parent):
-            print(f"project-registry.json not found, creating empty one...")
-            data = {"version": 1, "projects": [], "domain_index": {}}
-            with open(path, "w") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.write("\n")
+    # The registry is SOURCE data, not reconstructible from topics or a digest.
+    # Reads (including dry-run) never create an empty replacement.
+    for name in ("project-registry.json", ".project-registry.backup.json"):
+        try:
+            data = json.loads((Path(rdir) / name).read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or not isinstance(data.get("projects"), list):
+                continue
+            if not all(isinstance(p, dict) and isinstance(p.get("name"), str)
+                       for p in data["projects"]):
+                continue
+            if name.startswith("."):
+                print("Recovering project registry from validated local backup.")
             return data
-        else:
-            print(f"RadioHeader directory not found: {parent}", file=sys.stderr)
-            print("Run 'radioheader' or install RadioHeader first.", file=sys.stderr)
-            sys.exit(1)
-    with open(path) as f:
-        return json.load(f)
+        except (OSError, ValueError):
+            continue
+    raise ValueError("Project registry missing or invalid, and no valid backup exists. "
+                     "Restore project-registry.json from a backup; refusing to replace project cards with an empty registry.")
+
+
+def atomic_write(path: Path, text: str):
+    fd, temp = tempfile.mkstemp(prefix="." + path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+@contextmanager
+def registry_lock(rdir, dry_run):
+    if dry_run:
+        yield
+        return
+    with open(os.path.join(rdir, ".consolidate.lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 def load_search_log(rdir: str, days: int = 30) -> list:
@@ -337,7 +361,7 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
         "# 环境认知摘要",
         "",
         f"> 由 `radioheader consolidate` 于 {today.strftime('%Y-%m-%d')} 生成。",
-        "> 前台手动运行，或 opt-in（radiomind_auto）后随记忆同步刷新。Agent 通过此文件理解用户的整体环境。",
+        "> 前台手动运行或 auto_digest 本地刷新；RadioMind 后台增强需单独开启 radiomind_auto。",
         "",
     ]
 
@@ -499,6 +523,11 @@ def generate_context_digest(rdir: str, registry: dict, search_log: list,
 
 
 def consolidate(rdir: str, dry_run: bool = False):
+    with registry_lock(rdir, dry_run):
+        return _consolidate(rdir, dry_run)
+
+
+def _consolidate(rdir: str, dry_run: bool = False):
     """Main consolidation logic."""
     registry = load_registry(rdir)
     projects = registry.get("projects", [])
@@ -532,7 +561,8 @@ def consolidate(rdir: str, dry_run: bool = False):
         new_activity = compute_activity_decay(proj.get("last_active"), today)
 
         # Update search_hits
-        new_hits = old_hits + project_hits.get(name, 0)
+        # Rolling 30-day count, recomputed from the same input: idempotent.
+        new_hits = project_hits.get(name, 0)
 
         # Update attention_weight: blend of activity + hit frequency
         # Zero initialization principle: starts at 1.0, adjusts based on evidence
@@ -569,10 +599,10 @@ def consolidate(rdir: str, dry_run: bool = False):
         return
 
     # 4. Write updated registry
-    registry_path = os.path.join(rdir, "project-registry.json")
-    with open(registry_path, "w") as f:
-        json.dump(registry, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    registry_path = Path(rdir) / "project-registry.json"
+    serialized = json.dumps(registry, indent=2, ensure_ascii=False) + "\n"
+    atomic_write(Path(rdir) / ".project-registry.backup.json", serialized)
+    atomic_write(registry_path, serialized)
     print(f"Updated: {registry_path}")
 
     # 5. Generate readable .md
@@ -642,4 +672,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     rdir = args.radioheader_dir or get_radioheader_dir()
-    consolidate(rdir, dry_run=args.dry_run)
+    try:
+        consolidate(rdir, dry_run=args.dry_run)
+    except (ValueError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)

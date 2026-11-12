@@ -2,7 +2,7 @@
 set -e
 
 # RadioHeader — Cross-project memory framework for Claude Code and Codex
-# https://github.com/anthropics/radioheader
+# https://github.com/ZaptainZ/radioheader
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
@@ -15,6 +15,9 @@ CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
 CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 RUNTIME="both"
+ASSUME_YES=false
+BIN_DIR=""
+EXISTING_INSTALL=false
 
 # Colors
 RED='\033[0;31m'
@@ -40,6 +43,8 @@ detect_shell_rc() {
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --yes) ASSUME_YES=true; shift ;;
+    --bin-dir) BIN_DIR="$2"; shift 2 ;;
     --runtime)
       RUNTIME="$2"
       shift 2
@@ -50,7 +55,8 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<EOF
-Usage: ./install.sh [--runtime claude|codex|both]
+Usage: ./install.sh [--runtime claude|codex|both] [--yes] [--bin-dir /absolute/path]
+--yes reinstalls without prompts, preserving the community preference (default off).
 EOF
       exit 0
       ;;
@@ -203,12 +209,26 @@ mkdir -p "$CLAUDE_DIR"
 mkdir -p "$CODEX_DIR"
 
 if [ -d "$RADIOHEADER_DIR" ]; then
+  EXISTING_INSTALL=true
   warn "RadioHeader is already installed at $RADIOHEADER_DIR"
-  read -p "Reinstall? This will NOT delete your existing topics. [y/N] " -n 1 -r
-  echo
+  REPLY=y
+  if [ "$ASSUME_YES" != true ]; then
+    read -p "Reinstall? This will NOT delete your existing topics. [y/N] " -n 1 -r
+    echo
+  fi
   if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     info "Aborted."
     exit 0
+  fi
+fi
+
+if [ -n "$BIN_DIR" ]; then
+  case "$BIN_DIR" in /*) ;; *) err "--bin-dir must be absolute"; exit 1 ;; esac
+fi
+if [ "$EXISTING_INSTALL" = true ] && [ ! -f "$RADIOHEADER_DIR/project-registry.json" ]; then
+  if ! python3 "$SCRIPT_DIR/attn-consolidate.py" --radioheader-dir "$RADIOHEADER_DIR"; then
+    err "Existing registry cannot be recovered; restore it before reinstalling."
+    exit 1
   fi
 fi
 
@@ -500,7 +520,14 @@ fi
 # --- Step 5: Install CLI ---
 
 CLI_INSTALLED=""
-if [ -w "/usr/local/bin" ]; then
+if [ -n "$BIN_DIR" ]; then
+  mkdir -p "$BIN_DIR"
+  cp "$SCRIPT_DIR/radioheader" "$BIN_DIR/radioheader"
+  chmod +x "$BIN_DIR/radioheader"
+  CLI_INSTALLED="$BIN_DIR/radioheader"
+  export PATH="$BIN_DIR:$PATH"
+  ok "Installed CLI → $CLI_INSTALLED"
+elif [ -w "/usr/local/bin" ]; then
   cp "$SCRIPT_DIR/radioheader" "/usr/local/bin/radioheader"
   chmod +x "/usr/local/bin/radioheader"
   CLI_INSTALLED="/usr/local/bin/radioheader"
@@ -570,6 +597,12 @@ for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-ser
   fi
 done
 
+# Refresh generated sync adapters on upgrades without pulling, pushing, or
+# changing the user's enabled/disabled preference.
+if [ -d "$RADIOHEADER_DIR/.git" ]; then
+  "$CLI_INSTALLED" device-sync refresh
+fi
+
 # Build FTS5 search index (if shortwave/topics exist)
 if command -v radioheader &>/dev/null || [ -n "$CLI_INSTALLED" ]; then
   SW_COUNT=$(ls "$RADIOHEADER_DIR/shortwave/"*.md 2>/dev/null | wc -l | tr -d ' ')
@@ -585,7 +618,7 @@ if command -v radioheader &>/dev/null || [ -n "$CLI_INSTALLED" ]; then
 
   # Run consolidate to generate context-digest
   info "Generating context digest..."
-  if "$CLI_INSTALLED" consolidate >/dev/null 2>&1; then
+  if "$CLI_INSTALLED" consolidate --native >/dev/null 2>&1; then
     ok "Context digest generated"
   else
     warn "Context digest skipped (run 'radioheader consolidate' manually)"
@@ -602,12 +635,20 @@ echo "  RadioHeader can search a shared community library of shortwave entries."
 echo "  When enabled, search results include community entries with quality scores."
 echo "  You can toggle this anytime with: radioheader community on|off"
 echo ""
-read -p "  Enable community sharing? (recommended) [Y/n] " -n 1 -r
-echo
-
-COMMUNITY_ENABLED="true"
-if [[ $REPLY =~ ^[Nn]$ ]]; then
-  COMMUNITY_ENABLED="false"
+if [ "$ASSUME_YES" = true ]; then
+  COMMUNITY_ENABLED=$(python3 - "$CONFIG_FILE" <<'PYCOMM'
+import json, sys
+try:
+    print("true" if json.load(open(sys.argv[1])).get("community") is True else "false")
+except (OSError, ValueError, AttributeError):
+    print("false")
+PYCOMM
+)
+else
+  read -p "  Enable community sharing? (recommended) [Y/n] " -n 1 -r
+  echo
+  COMMUNITY_ENABLED="true"
+  if [[ $REPLY =~ ^[Nn]$ ]]; then COMMUNITY_ENABLED="false"; fi
 fi
 
 python3 -c "
