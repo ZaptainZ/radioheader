@@ -19,6 +19,14 @@ class KimiTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='rh-kimi-')
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name).resolve()
+        # The legacy full uninstaller also checks /usr/local/bin. Redirect
+        # that fixed path so running tests on an installed developer machine
+        # can never remove its real CLI, even though HOME is isolated.
+        harness = self.home / 'uninstall-harness'
+        harness.mkdir()
+        self.uninstaller = harness / 'uninstall.sh'
+        self.uninstaller.write_text((ROOT / 'uninstall.sh').read_text().replace('/usr/local/bin', str(self.home / 'system-bin')))
+        shutil.copy2(ROOT / 'kimi-config.py', harness / 'kimi-config.py')
         self.kimi = self.home / '.kimi-code'
         self.kimi.mkdir()
         self.config = self.kimi / 'config.toml'
@@ -130,7 +138,7 @@ class KimiTests(unittest.TestCase):
         self.assertEqual(self.run_cmd(cli, 'upgrade', 'KimiProbe').returncode, 0)
         self.assertTrue(entry.exists())
         self.assertFalse((self.project / 'AGENTS.md').exists())
-        r = self.run_cmd('bash', str(ROOT / 'uninstall.sh'), '--runtime', 'kimi')
+        r = self.run_cmd('bash', str(self.uninstaller), '--runtime', 'kimi')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(self.original))
         self.assertTrue(Path(cli).exists())
@@ -139,7 +147,7 @@ class KimiTests(unittest.TestCase):
 
     def test_uninstall_both_preserves_installed_kimi(self):
         self.install('all')
-        r = self.run_cmd('bash', str(ROOT / 'uninstall.sh'), '--runtime', 'both', input='n\n')
+        r = self.run_cmd('bash', str(self.uninstaller), '--runtime', 'both', input='n\n')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.config_cmd('check').returncode, 0)
         self.assertTrue((self.home / 'bin/radioheader').exists())
@@ -207,7 +215,7 @@ class KimiTests(unittest.TestCase):
     def test_full_uninstall_removes_all_owned_adapters(self):
         self.install('all')
         (self.data / 'topics/keep.md').write_text('user knowledge')
-        r = self.run_cmd('bash', str(ROOT / 'uninstall.sh'), '--runtime', 'all', input='n\n')
+        r = self.run_cmd('bash', str(self.uninstaller), '--runtime', 'all', input='n\n')
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(tomllib.loads(self.config.read_text()), tomllib.loads(self.original))
         self.assertFalse((self.hooks / 'radioheader-kimi.py').exists())
