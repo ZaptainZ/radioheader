@@ -13,7 +13,7 @@ Claude：RadioHeader 中有来自 ProjectA 的经验：
         验证一下是否适用…… ✓ 同样的模式。正在修复。
 ```
 
-一次安装，Claude Code、Codex CLI、Kimi Code 和所有 MCP 兼容 Agent 通用，共享同一份记忆。
+一次安装，Claude Code、Codex CLI、Kimi Code、Gemini CLI 和所有 MCP 兼容 Agent 通用，共享同一份记忆。
 
 [English](README.md) · [工作原理](docs/how-it-works.md) · [MCP 服务](docs/mcp-server.md) · [实战经验](docs/lessons-learned.md)
 
@@ -91,7 +91,7 @@ RadioHeader (~/.claude/radioheader/)
 人类的记忆在睡眠中压缩：情节淡去，模式固化。RadioHeader 的 `consolidate` 做同样的事：
 
 ```
-记忆同步累积 → CC 每 5 次写入 / Codex 每 5 个有变化的回合自动 consolidate
+记忆同步累积 → CC 每 5 次写入 / Codex、Kimi、Gemini 每 5 个有变化的回合自动 consolidate
                         ↓
         分析搜索日志 + 项目活跃度 + 用户画像
                         ↓
@@ -150,17 +150,19 @@ radioheader mcp-server          # 启动 stdio 服务
 
 RadioHeader 的数据层只有一份，上层通过**运行时适配器**对接不同的编程 Agent：
 
-| | Claude Code | Codex CLI | Kimi Code | MCP 客户端 |
-|---|---|---|---|---|
-| 入口文件 | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | `~/.kimi-code/AGENTS.md` | System prompt |
-| Echo 触发 | `PostToolUse Write\|Edit` | `UserPromptSubmit` 快照 + `Stop` diff | 快照 + Kimi Stop 补偿 | — |
-| 项目脚手架 | `.claude/settings.json` | `.codex/hooks.json` | `.kimi-code/AGENTS.md` (user-level hooks) | — |
+| | Claude Code | Codex CLI | Kimi Code | Gemini CLI | MCP 客户端 |
+|---|---|---|---|---|---|
+| 入口文件 | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | `~/.kimi-code/AGENTS.md` | `~/.gemini/GEMINI.md` | System prompt |
+| Echo 触发 | `PostToolUse Write\|Edit` | `UserPromptSubmit` 快照 + `Stop` diff | `BeforeAgent` 快照 + `AfterAgent` deny 重试 | — |
+| 项目脚手架 | `.claude/settings.json` | `.codex/hooks.json` | `.kimi-code/AGENTS.md` (user-level hooks) | `GEMINI.md` (user-level hooks) | — |
 
 Codex 侧采用**快照 + 差分**闭环（涵盖 `apply_patch` 和 shell 写入）：`UserPromptSubmit` 在每个 turn 前对 memory/topics/shortwave 做指纹；`Stop` 时 diff，发现 Echo 链有缺位就用 `decision: block` + continuation prompt 补齐。
 
 首次使用仍需遵循客户端权限流程：Codex 的新增或变更 Hook 要先通过 `/hooks` 审阅；CC 写入 `~/.claude/` 下的全局 topics/shortwave 时，即使处于 `acceptEdits`，也可能要求确认，普通 settings allow 规则不能预先批准受保护路径写入。请在正常权限提示中批准具体编辑；无法取得批准的无界面 `-p` 会话可能无法完成 Echo 链。参见 [Codex Hook 信任](https://learn.chatgpt.com/docs/hooks) 和 [CC 受保护路径](https://code.claude.com/docs/en/permission-modes#protected-paths)。
 
 Kimi Code 2.3.3 适配需要 **Python 3.11+**：摘要通过 UserPromptSubmit 注入，Stop 用退出码 2 请求补偿，保留现有模型和自定义 Hooks。默认 `both` 仍是 CC + Codex；三端安装使用 `all`。配置、验证和生命周期限制见 [Kimi 接入说明](docs/kimi-code.md)。
+
+Gemini CLI 0.70 适配：`SessionStart` 注入摘要，`AfterAgent` 用 deny 请求一次 Echo 补偿，保留 `settings.json` 中其他配置和 Hooks。`all` 现在安装全部四个运行时。详见 [Gemini 接入说明](docs/gemini-cli.md)。
 
 Python hooks 目标 **Python 3.7+**（`from __future__ import annotations`）。仓库遍历上限 10k 文件，24 小时 TTL 自动清理陈旧快照。
 
@@ -181,7 +183,8 @@ cd radioheader
 ./install.sh --runtime codex    # 只装 Codex CLI
 ./install.sh --runtime both     # 默认：CC + Codex
 ./install.sh --runtime kimi     # 只装 Kimi Code
-./install.sh --runtime all      # 三个运行时
+./install.sh --runtime gemini   # 只装 Gemini CLI
+./install.sh --runtime all      # 全部四个运行时
 ```
 
 可选：在项目中运行 `radioheader init` 添加项目级脚手架（Echo 规则、日志目录、文档模板）。
@@ -197,9 +200,9 @@ radioheader index --rebuild  # 按需重建派生索引
 radioheader consolidate --native
 ```
 
-2.5.0 新增 Kimi Code 适配（`--runtime kimi|all`）。2.4.1 新增 Codex 每 5 个记忆变化回合自动刷新本地摘要；重装时刷新设备同步脚本，保留同步开关。修复增量 FTS 一致性、本地/社区 ID 冲突、注册表备份恢复、Codex 记忆路径与后台门控、模板个人路径。`doctor` 用只读快照核验 FTS，有问题时返回非零退出码。
+2.6.0 新增 Gemini CLI 适配（`--runtime gemini|all`）。2.5.0 新增 Kimi Code 适配（`--runtime kimi|all`）。2.4.1 新增 Codex 每 5 个记忆变化回合自动刷新本地摘要；重装时刷新设备同步脚本，保留同步开关。修复增量 FTS 一致性、本地/社区 ID 冲突、注册表备份恢复、Codex 记忆路径与后台门控、模板个人路径。`doctor` 用只读快照核验 FTS，有问题时返回非零退出码。
 
-回归测试：`python3 -m unittest discover -s tests -p 'test_maintenance.py'`、`python3 tests/test_digest_quality.py`、`bash tests/test_auto_digest.sh`、`bash tests/test_device_sync.sh`。
+回归测试：`python3 -m unittest discover -s tests -p 'test_maintenance.py'`、`python3 -m unittest discover -s tests -p 'test_gemini.py'`、`test_kimi.py`（需 Python 3.11+）、`python3 tests/test_digest_quality.py`、`bash tests/test_auto_digest.sh`、`bash tests/test_device_sync.sh`。
 
 ## 使用
 
@@ -222,7 +225,7 @@ radioheader doctor
 | 命令 | 功能 |
 |------|------|
 | `search <关键词>` | BM25 + 同义词搜索 topics、shortwave、社区库 |
-| `init` | 项目脚手架（`--runtime claude\|codex\|kimi\|both\|all`） |
+| `init` | 项目脚手架（`--runtime claude\|codex\|kimi\|gemini\|both\|all`） |
 | `index [--rebuild]` | 构建/更新 FTS5 搜索索引 |
 | `learn <url>` | 提取文章为短波条目 |
 | `consolidate` | 更新注意力权重和环境认知摘要 |

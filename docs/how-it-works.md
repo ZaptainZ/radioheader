@@ -162,3 +162,7 @@ Codex requires review of new or changed hook definitions through `/hooks`; insta
 ### Kimi Code adapter (2.5)
 
 Kimi reuses the snapshot engine with its own state directory and consolidation counter. Its prompt hook returns a `message`; its Stop hook requests continuation through exit code 2 and stderr. Global TOML hooks are managed without replacing user model/provider settings. `SessionEnd` flushes compensation writes because Kimi 2.3.3 does not repeat Stop after continuation. See [Kimi Code integration](kimi-code.md) for setup, lifecycle and compatibility boundaries.
+
+### Gemini CLI adapter (2.6)
+
+Gemini reuses the same snapshot engine with its own state directory and consolidation counter. `SessionStart` returns `hookSpecificOutput.additionalContext`; `BeforeAgent` takes the per-prompt baseline; `AfterAgent` returns `decision: "deny"`, which Gemini feeds back as a retry prompt, and the `stop_hook_active` pass is never re-checked. Hooks in `~/.gemini/settings.json` are owned by exact command and merged without touching other settings. See [Gemini CLI integration](gemini-cli.md).

@@ -10,6 +10,7 @@ HOOKS_DIR="$CLAUDE_DIR/hooks"
 CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
 KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
+GEMINI_DIR="${GEMINI_CLI_HOME:-$HOME}/.gemini"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX_DIR="$HOME/.codex"
 CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
@@ -38,14 +39,14 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "Usage: ./uninstall.sh [--runtime claude|codex|kimi|both|all]"
+      echo "Usage: ./uninstall.sh [--runtime claude|codex|kimi|gemini|both|all]"
       exit 1
       ;;
   esac
 done
 
 case "$RUNTIME" in
-  claude|codex|kimi|both|all) ;;
+  claude|codex|kimi|gemini|both|all) ;;
   *)
     echo "Invalid runtime: $RUNTIME"
     exit 1
@@ -64,12 +65,18 @@ kimi_enabled() {
   [ "$RUNTIME" = "kimi" ] || [ "$RUNTIME" = "all" ]
 }
 
+gemini_enabled() {
+  [ "$RUNTIME" = "gemini" ] || [ "$RUNTIME" = "all" ]
+}
+
 # "both" retains its original CC+Codex meaning. Never remove shared engines
-# when an installed Kimi runtime still depends on them.
+# when an installed Kimi or Gemini runtime still depends on them.
 FULL_UNINSTALL=false
 if [ "$RUNTIME" = "all" ] || { [ "$RUNTIME" = "both" ] &&
     ! grep -q 'RadioHeader START' "$KIMI_DIR/AGENTS.md" 2>/dev/null &&
-    ! grep -q 'radioheader-kimi.py' "$KIMI_DIR/config.toml" 2>/dev/null; }; then
+    ! grep -q 'radioheader-kimi.py' "$KIMI_DIR/config.toml" 2>/dev/null &&
+    ! grep -q 'RadioHeader START' "$GEMINI_DIR/GEMINI.md" 2>/dev/null &&
+    ! grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null; }; then
   FULL_UNINSTALL=true
 fi
 
@@ -83,6 +90,9 @@ if kimi_enabled; then
   done
   if [ -z "$KIMI_PY" ]; then echo "Kimi configuration needs Python 3.11+"; exit 1; fi
   "$KIMI_PY" "$SCRIPT_DIR/kimi-config.py" remove --config "$KIMI_DIR/config.toml"
+fi
+if gemini_enabled; then
+  python3 "$SCRIPT_DIR/gemini-config.py" remove --config "$GEMINI_DIR/settings.json"
 fi
 
 remove_managed_section() {
@@ -183,10 +193,15 @@ if kimi_enabled; then
   rm -f "$HOOKS_DIR/radioheader-kimi.py"
 fi
 
+if gemini_enabled; then
+  remove_managed_section "$GEMINI_DIR/GEMINI.md" "Gemini GEMINI.md"
+  rm -f "$HOOKS_DIR/radioheader-gemini.py"
+fi
+
 # --- Step 2: Remove shared hook scripts only on full uninstall ---
 
 if [ "$FULL_UNINSTALL" = "true" ]; then
-  rm -f "$HOOKS_DIR/radioheader-kimi.py"
+  rm -f "$HOOKS_DIR/radioheader-kimi.py" "$HOOKS_DIR/radioheader-gemini.py"
   if [ -f "$HOOKS_DIR/check-project-architecture.sh" ]; then
     rm "$HOOKS_DIR/check-project-architecture.sh"
     ok "Removed check-project-architecture.sh"
@@ -311,7 +326,7 @@ fi
 
 # --- Step 5: Remove CLI and companion scripts ---
 
-COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py"
+COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py gemini-config.py"
 
 remove_cli_dir() {
   local dir="$1"

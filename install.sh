@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# RadioHeader — Cross-project memory framework for Claude Code, Codex, and Kimi Code
+# RadioHeader — Cross-project memory framework for Claude Code, Codex, Kimi Code, and Gemini CLI
 # https://github.com/ZaptainZ/radioheader
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -15,6 +15,8 @@ CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
 CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 KIMI_PY=""
+# GEMINI_CLI_HOME replaces the home directory; Gemini appends .gemini itself.
+GEMINI_DIR="${GEMINI_CLI_HOME:-$HOME}/.gemini"
 TIMESTAMP=$(date +%Y%m%d%H%M%S)
 RUNTIME="both"
 ASSUME_YES=false
@@ -57,7 +59,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<EOF
-Usage: ./install.sh [--runtime claude|codex|kimi|both|all] [--yes] [--bin-dir /absolute/path]
+Usage: ./install.sh [--runtime claude|codex|kimi|gemini|both|all] [--yes] [--bin-dir /absolute/path]
 --yes reinstalls without prompts, preserving the community preference (default off).
 EOF
       exit 0
@@ -70,9 +72,9 @@ EOF
 done
 
 case "$RUNTIME" in
-  claude|codex|kimi|both|all) ;;
+  claude|codex|kimi|gemini|both|all) ;;
   *)
-    err "Invalid runtime: $RUNTIME (expected claude, codex, kimi, both, or all)"
+    err "Invalid runtime: $RUNTIME (expected claude, codex, kimi, gemini, both, or all)"
     exit 1
     ;;
 esac
@@ -89,6 +91,10 @@ kimi_enabled() {
   [ "$RUNTIME" = "kimi" ] || [ "$RUNTIME" = "all" ]
 }
 
+gemini_enabled() {
+  [ "$RUNTIME" = "gemini" ] || [ "$RUNTIME" = "all" ]
+}
+
 # Parse TOML before changing any runtime files. Kimi keeps provider credentials
 # here, so invalid config must be preserved and reported, never reset.
 if kimi_enabled; then
@@ -99,6 +105,12 @@ if kimi_enabled; then
   done
   if [ -z "$KIMI_PY" ]; then err "Kimi configuration needs Python 3.11+"; exit 1; fi
   "$KIMI_PY" "$SCRIPT_DIR/kimi-config.py" validate --config "$KIMI_DIR/config.toml"
+fi
+
+# Same for Gemini: settings.json is parsed (and refused if it is not strict
+# JSON) before any runtime file is touched.
+if gemini_enabled; then
+  python3 "$SCRIPT_DIR/gemini-config.py" validate --config "$GEMINI_DIR/settings.json"
 fi
 
 append_managed_section() {
@@ -341,6 +353,8 @@ chmod +x "$HOOKS_DIR/radioheader-stop-codex.py"
 
 cp "$SCRIPT_DIR/templates/hooks/radioheader-kimi.py" "$HOOKS_DIR/radioheader-kimi.py"
 chmod +x "$HOOKS_DIR/radioheader-kimi.py"
+cp "$SCRIPT_DIR/templates/hooks/radioheader-gemini.py" "$HOOKS_DIR/radioheader-gemini.py"
+chmod +x "$HOOKS_DIR/radioheader-gemini.py"
 ok "Installed shared runtime hook scripts"
 
 # --- Step 3: Append rules to CLAUDE.md ---
@@ -545,6 +559,12 @@ if kimi_enabled; then
   ok "Merged RadioHeader hooks into $KIMI_DIR/config.toml (other hooks preserved)"
 fi
 
+if gemini_enabled; then
+  append_managed_section "$GEMINI_DIR/GEMINI.md" "$SCRIPT_DIR/templates/global-agents-md.md" "Gemini GEMINI.md"
+  python3 "$SCRIPT_DIR/gemini-config.py" install --config "$GEMINI_DIR/settings.json"
+  ok "Merged RadioHeader hooks into $GEMINI_DIR/settings.json (other settings preserved)"
+fi
+
 # --- Step 5: Install CLI ---
 
 CLI_INSTALLED=""
@@ -616,7 +636,7 @@ echo ""
 info "Running post-install initialization..."
 
 # Copy Python scripts alongside CLI
-for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py; do
+for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py gemini-config.py; do
   if [ -f "$SCRIPT_DIR/$pyfile" ]; then
     cp "$SCRIPT_DIR/$pyfile" "$(dirname "$CLI_INSTALLED")/$pyfile"
     if [[ "$pyfile" == "radioheader-mcp-server.py" ]]; then
@@ -708,9 +728,11 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "What's next:"
 if [ "$RUNTIME" = "all" ]; then
-  echo "  1. Open Claude Code, Codex, or Kimi Code; follow client permission prompts"
+  echo "  1. Open Claude Code, Codex, Kimi Code, or Gemini CLI; follow client permission prompts"
 elif [ "$RUNTIME" = "kimi" ]; then
   echo "  1. Open Kimi Code in a project; global rules and hooks are installed"
+elif [ "$RUNTIME" = "gemini" ]; then
+  echo "  1. Open Gemini CLI in a project; global rules and hooks are installed"
 elif [ "$RUNTIME" = "both" ]; then
   echo "  1. Open any project with Claude Code or Codex — RadioHeader is already active"
 elif [ "$RUNTIME" = "claude" ]; then
@@ -754,4 +776,8 @@ echo ""
 if kimi_enabled; then
   echo "  Kimi rules: $KIMI_DIR/AGENTS.md"
   echo "  Kimi hooks: $KIMI_DIR/config.toml"
+fi
+if gemini_enabled; then
+  echo "  Gemini rules: $GEMINI_DIR/GEMINI.md"
+  echo "  Gemini hooks: $GEMINI_DIR/settings.json"
 fi

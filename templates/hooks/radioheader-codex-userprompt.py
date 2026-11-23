@@ -26,6 +26,7 @@ EXCLUDED_DIRS = {
     ".claude",
     ".codex",
     ".kimi-code",
+    ".gemini",
     "node_modules",
     "Pods",
     "build",
@@ -98,8 +99,10 @@ def tracked_files(cwd: Path):
     candidates = [
         cwd / "AGENTS.md",
         cwd / "CLAUDE.md",
+        cwd / "GEMINI.md",
         cwd / ".codex",
         cwd / ".kimi-code",
+        cwd / ".gemini",
         cwd / ".claude",
         project_memory_dir(cwd),
         RADIOHEADER_DIR / "topics",

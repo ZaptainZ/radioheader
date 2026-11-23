@@ -22,6 +22,7 @@ EXCLUDED_DIRS = {
     ".claude",
     ".codex",
     ".kimi-code",
+    ".gemini",
     "node_modules",
     "Pods",
     "build",
@@ -84,8 +85,10 @@ def tracked_files(cwd: Path, doc_dir: Path | None, memory_dir: Path):
     candidates = [
         cwd / "AGENTS.md",
         cwd / "CLAUDE.md",
+        cwd / "GEMINI.md",
         cwd / ".codex",
         cwd / ".kimi-code",
+        cwd / ".gemini",
         cwd / ".claude",
         memory_dir,
         RADIOHEADER_DIR / "topics",
@@ -265,6 +268,7 @@ def main(payload=None):
     claude_rules_dir = cwd / ".claude" / "rules"
     codex_dir = cwd / ".codex"
     kimi_dir = cwd / ".kimi-code"
+    gemini_dir = cwd / ".gemini"
 
     topic_changes = [p for p in changes if is_under(Path(p), topic_root)]
     shortwave_changes = [p for p in changes if is_under(Path(p), shortwave_root)]
@@ -276,9 +280,10 @@ def main(payload=None):
     runtime_changes = [
         p
         for p in changes
-        if Path(p) in {cwd / "AGENTS.md", cwd / "CLAUDE.md"}
+        if Path(p) in {cwd / "AGENTS.md", cwd / "CLAUDE.md", cwd / "GEMINI.md"}
         or is_under(Path(p), codex_dir)
         or is_under(Path(p), kimi_dir)
+        or is_under(Path(p), gemini_dir)
         or is_under(Path(p), claude_dir)
     ]
     project_doc_changes = [
@@ -297,7 +302,8 @@ def main(payload=None):
         and not is_under(Path(p), claude_rules_dir)
         and not is_under(Path(p), codex_dir)
         and not is_under(Path(p), kimi_dir)
-        and Path(p) not in {cwd / "AGENTS.md", cwd / "CLAUDE.md"}
+        and not is_under(Path(p), gemini_dir)
+        and Path(p) not in {cwd / "AGENTS.md", cwd / "CLAUDE.md", cwd / "GEMINI.md"}
     ]
 
     if snapshot_path.exists():

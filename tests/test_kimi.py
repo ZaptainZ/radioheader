@@ -26,7 +26,8 @@ class KimiTests(unittest.TestCase):
         harness.mkdir()
         self.uninstaller = harness / 'uninstall.sh'
         self.uninstaller.write_text((ROOT / 'uninstall.sh').read_text().replace('/usr/local/bin', str(self.home / 'system-bin')))
-        shutil.copy2(ROOT / 'kimi-config.py', harness / 'kimi-config.py')
+        for helper in ('kimi-config.py', 'gemini-config.py'):
+            shutil.copy2(ROOT / helper, harness / helper)
         self.kimi = self.home / '.kimi-code'
         self.kimi.mkdir()
         self.config = self.kimi / 'config.toml'

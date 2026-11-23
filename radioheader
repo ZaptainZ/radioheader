@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# RadioHeader CLI — Cross-project experience sharing for Claude Code, Codex, and Kimi Code
+# RadioHeader CLI — Cross-project experience sharing for Claude Code, Codex, Kimi Code, and Gemini CLI
 # Usage: radioheader <command> [options]
 
-VERSION="2.5.0"
+VERSION="2.6.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -21,6 +21,8 @@ CODEX_DIR="$HOME/.codex"
 CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
 CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
+# GEMINI_CLI_HOME replaces the home directory; Gemini appends .gemini itself.
+GEMINI_DIR="${GEMINI_CLI_HOME:-$HOME}/.gemini"
 
 # Default community repository (users can override in config.json)
 DEFAULT_COMMUNITY_REPO="https://github.com/ZaptainZ/radioheader-community.git"
@@ -124,11 +126,21 @@ check_kimi_runtime() {
   return 1
 }
 
+gemini_runtime_enabled() {
+  grep -q "RadioHeader START" "$GEMINI_DIR/GEMINI.md" 2>/dev/null ||
+    grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null
+}
+
+check_gemini_runtime() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/gemini-config.py" check --config "$GEMINI_DIR/settings.json"
+}
+
 sync_hooks_registered() {
   [ "$(config_get device_sync_enabled false)" = "true" ] || return 1
   grep -q "radioheader-git-sync.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null ||
     grep -q "radioheader-git-sync.sh" "$CODEX_HOOKS_JSON" 2>/dev/null ||
-    { kimi_runtime_enabled && check_kimi_runtime >/dev/null 2>&1; }
+    { kimi_runtime_enabled && check_kimi_runtime >/dev/null 2>&1; } ||
+    { gemini_runtime_enabled && check_gemini_runtime >/dev/null 2>&1; }
 }
 
 project_runtime_summary() {
@@ -136,6 +148,7 @@ project_runtime_summary() {
   [ -f "CLAUDE.md" ] && modes+=("claude")
   [ -f "AGENTS.md" ] && modes+=("codex")
   [ -f ".kimi-code/AGENTS.md" ] && modes+=("kimi")
+  [ -f "GEMINI.md" ] && modes+=("gemini")
   if [ "${#modes[@]}" -eq 0 ]; then
     echo "none"
   else
@@ -219,7 +232,7 @@ cmd_help() {
   cat <<EOF
 
 ${BOLD}RadioHeader CLI${NC} v${VERSION}
-Cross-project experience sharing for Claude Code, Codex, and Kimi Code
+Cross-project experience sharing for Claude Code, Codex, Kimi Code, and Gemini CLI
 
 ${BOLD}USAGE${NC}
   radioheader <command> [options]
@@ -303,7 +316,7 @@ ${BOLD}FLAGS${NC}
   --stack <stack>    Tech stack, e.g. "iOS/SwiftUI" (required)
   --doc-dir <dir>   Documentation directory name (default: projectBasicInfo)
   --terms <terms>   Terminology mappings (optional)
-  --runtime <mode>  claude | codex | kimi | both | all (default: both)
+  --runtime <mode>  claude | codex | kimi | gemini | both | all (default: both)
 
 ${BOLD}INTERACTIVE MODE${NC}
   Run without flags to be prompted for each value.
@@ -325,9 +338,9 @@ EOF
   fi
 
   case "$runtime" in
-    claude|codex|kimi|both|all) ;;
+    claude|codex|kimi|gemini|both|all) ;;
     *)
-      err "Invalid runtime: $runtime (expected claude, codex, kimi, both, or all)"
+      err "Invalid runtime: $runtime (expected claude, codex, kimi, gemini, both, or all)"
       return 1
       ;;
   esac
@@ -339,7 +352,7 @@ EOF
   fi
 
   # Check if already initialized
-  if [ -f ".claude/rules/memory-echo.md" ] || [ -f "CLAUDE.md" ] || [ -f "AGENTS.md" ] || [ -f ".kimi-code/AGENTS.md" ]; then
+  if [ -f ".claude/rules/memory-echo.md" ] || [ -f "CLAUDE.md" ] || [ -f "AGENTS.md" ] || [ -f ".kimi-code/AGENTS.md" ] || [ -f "GEMINI.md" ]; then
     warn "This project appears to be already initialized."
     read -p "Re-initialize? Existing files will NOT be overwritten. [y/N] " -n 1 -r
     echo
@@ -437,6 +450,20 @@ EOF
       sedi "s|__TERMINOLOGY__|$terminology|g" .kimi-code/AGENTS.md
       sedi "s|__DOC_DIR__|$doc_dir|g" .kimi-code/AGENTS.md
       ok "Created .kimi-code/AGENTS.md (Kimi hooks remain user-level)"
+    fi
+  fi
+
+  # GEMINI.md — Gemini CLI's default project context file
+  if [ "$runtime" = "gemini" ] || [ "$runtime" = "all" ]; then
+    if [ -f GEMINI.md ]; then
+      warn "GEMINI.md already exists, skipping (not overwriting)"
+    else
+      cp "$TEMPLATES_DIR/AGENTS.md.template" GEMINI.md
+      sedi "s|__PROJECT_NAME__|$project_name|g" GEMINI.md
+      sedi "s|__TECH_STACK__|$tech_stack|g" GEMINI.md
+      sedi "s|__TERMINOLOGY__|$terminology|g" GEMINI.md
+      sedi "s|__DOC_DIR__|$doc_dir|g" GEMINI.md
+      ok "Created GEMINI.md (Gemini hooks remain user-level)"
     fi
   fi
 
@@ -669,12 +696,22 @@ with open('$REGISTRY_JSON', 'w') as f:
     echo "  .codex/hooks.json"
     echo "  .codex/hooks/{load-project-rules.sh,stop-reminder.py}"
   fi
+  if [ "$runtime" = "kimi" ] || [ "$runtime" = "all" ]; then
+    echo "  .kimi-code/AGENTS.md"
+  fi
+  if [ "$runtime" = "gemini" ] || [ "$runtime" = "all" ]; then
+    echo "  GEMINI.md"
+  fi
   echo "  .claude/rules/{memory-echo,logs-writing,information-lookup}.md"
   echo "  $doc_dir/{00_AGENT_RULES,01_PROJECT_OVERVIEW}.md"
   echo "  $doc_dir/logs/"
   echo ""
-  if [ "$runtime" = "kimi" ] || [ "$runtime" = "all" ]; then
+  if [ "$runtime" = "all" ]; then
+    echo "Next: Open this project with any installed runtime (install --runtime all for global hooks)."
+  elif [ "$runtime" = "kimi" ]; then
     echo "Next: Open Kimi Code (install --runtime kimi or all for global hooks)."
+  elif [ "$runtime" = "gemini" ]; then
+    echo "Next: Open Gemini CLI (install --runtime gemini or all for global hooks)."
   elif [ "$runtime" = "both" ]; then
     echo "Next: Open this project with Claude Code or Codex to start using RadioHeader."
   elif [ "$runtime" = "claude" ]; then
@@ -1274,6 +1311,10 @@ PY
     echo -e "  Kimi runtime enabled ($KIMI_DIR)"
     check_kimi_runtime || true
   fi
+  if gemini_runtime_enabled; then
+    echo -e "  Gemini runtime enabled ($GEMINI_DIR)"
+    check_gemini_runtime || true
+  fi
   echo -e "  Project runtime: $(project_runtime_summary)"
 
   echo ""
@@ -1488,6 +1529,15 @@ cmd_doctor() {
       echo -e "  ${GREEN}✓${NC} Kimi runtime configured"
     else
       echo -e "  ${RED}✗${NC} Kimi runtime needs repair"
+      issues=$((issues + 1))
+    fi
+  fi
+
+  if gemini_runtime_enabled; then
+    if check_gemini_runtime; then
+      echo -e "  ${GREEN}✓${NC} Gemini runtime configured"
+    else
+      echo -e "  ${RED}✗${NC} Gemini runtime needs repair"
       issues=$((issues + 1))
     fi
   fi
@@ -3385,6 +3435,10 @@ pending-publish/
 .kimi-turn-snapshots/
 .kimi-consolidate-counter
 .kimi-consolidate.log
+.gemini-turn-snapshots/
+.gemini-consolidate-counter
+.gemini-consolidate.log
+.gemini-sync.log
 .digest-rebuilding
 .radiomind-suggested
 .sync.lock
@@ -3622,9 +3676,10 @@ GITSYNC_HOOK
 # Values cross into python via env vars to avoid shell-escaping issues.
 _sync_hooks_json() {
   local mode="$1"
-  # Kimi's permanent lifecycle adapter delegates sync behind the existing
-  # opt-in gate. Do not accidentally enable Claude on a Kimi-only install.
-  if [ -f "$SYNC_SETTINGS_JSON" ] || [ -f "$CLAUDE_DIR/CLAUDE.md" ] || ! kimi_runtime_enabled; then
+  # Kimi's and Gemini's permanent lifecycle adapters delegate sync behind the
+  # existing opt-in gate. Do not accidentally enable Claude on their installs.
+  if [ -f "$SYNC_SETTINGS_JSON" ] || [ -f "$CLAUDE_DIR/CLAUDE.md" ] ||
+      { ! kimi_runtime_enabled && ! gemini_runtime_enabled; }; then
     _sync_hooks_json_one "$mode" "$SYNC_SETTINGS_JSON" ""
   fi
   if [ -f "$CODEX_HOOKS_JSON" ]; then
@@ -4867,6 +4922,8 @@ PY
     local has_codex=false
     local has_kimi=false
     [ -d "$ppath/.kimi-code" ] && has_kimi=true
+    local has_gemini=false
+    { [ -f "$ppath/GEMINI.md" ] || [ -d "$ppath/.gemini" ]; } && has_gemini=true
     if [ -f "$ppath/CLAUDE.md" ] || [ -f "$ppath/.claude/settings.json" ]; then
       has_claude=true
     fi
@@ -4883,6 +4940,8 @@ PY
       metadata_source="$ppath/AGENTS.md"
     elif [ -f "$ppath/.kimi-code/AGENTS.md" ]; then
       metadata_source="$ppath/.kimi-code/AGENTS.md"
+    elif [ -f "$ppath/GEMINI.md" ]; then
+      metadata_source="$ppath/GEMINI.md"
     fi
     if [ -n "$metadata_source" ]; then
       local parsed_stack
@@ -5033,6 +5092,20 @@ PY
         sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/.kimi-code/AGENTS.md"
         sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/.kimi-code/AGENTS.md"
         echo -e "    ${GREEN}+${NC} Added missing: .kimi-code/AGENTS.md"
+      fi
+      project_changes=$((project_changes + 1))
+    fi
+
+    if [ "$has_gemini" = true ] && [ ! -f "$ppath/GEMINI.md" ]; then
+      if [ "$dry_run" = true ]; then
+        echo -e "    ${YELLOW}+${NC} Would add missing: GEMINI.md"
+      else
+        cp "$TEMPLATES_DIR/AGENTS.md.template" "$ppath/GEMINI.md"
+        sedi "s|__PROJECT_NAME__|$pname|g" "$ppath/GEMINI.md"
+        sedi "s|__TECH_STACK__|$project_tech_stack|g" "$ppath/GEMINI.md"
+        sedi "s|__TERMINOLOGY__|$project_terminology|g" "$ppath/GEMINI.md"
+        sedi "s|__DOC_DIR__|$project_doc_dir|g" "$ppath/GEMINI.md"
+        echo -e "    ${GREEN}+${NC} Added missing: GEMINI.md"
       fi
       project_changes=$((project_changes + 1))
     fi
