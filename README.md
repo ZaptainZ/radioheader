@@ -13,7 +13,7 @@ Claude: RadioHeader has experience from ProjectA:
         Verifying this applies here... ✓ Same pattern. Applying fix.
 ```
 
-One install. Works on Claude Code, Codex CLI, Kimi Code, Gemini CLI, and any MCP-compatible agent. Shared memory with runtime-native hooks.
+One install. Works on Claude Code, Codex CLI, Kimi Code, Gemini CLI, Antigravity CLI, and any MCP-compatible agent. Shared memory with runtime-native hooks.
 
 [中文文档](README_zh.md) · [How It Works](docs/how-it-works.md) · [MCP Server](docs/mcp-server.md) · [Lessons Learned](docs/lessons-learned.md)
 
@@ -91,7 +91,7 @@ RadioHeader (~/.claude/radioheader/)
 Human memory compresses during sleep: episodes fade, but patterns solidify. RadioHeader's `consolidate` does the same:
 
 ```
-Memory syncs accumulate → every 5 writes (Claude) / changed turns (Codex/Kimi/Gemini), consolidate runs automatically
+Memory syncs accumulate → every 5 writes (Claude) / changed turns (Codex/Kimi/Gemini/Antigravity), consolidate runs automatically
                                     ↓
                   Analyzes search logs + project activity + user profile
                                     ↓
@@ -150,11 +150,11 @@ See [docs/mcp-server.md](docs/mcp-server.md) for client-specific setup and a rec
 
 RadioHeader ships a single data layer with **runtime adapters** that plug into whichever coding agent you're using:
 
-| | Claude Code | Codex CLI | Kimi Code | Gemini CLI | MCP agents |
-|---|---|---|---|---|---|
-| Entry file | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | `~/.kimi-code/AGENTS.md` | `~/.gemini/GEMINI.md` | System prompt |
-| Echo trigger | `PostToolUse Write\|Edit` | `UserPromptSubmit` snapshot + `Stop` diff | `BeforeAgent` snapshot + `AfterAgent` deny/retry | — |
-| Per-project scaffold | `.claude/settings.json` | `.codex/hooks.json` | `.kimi-code/AGENTS.md` (user-level hooks) | `GEMINI.md` (user-level hooks) | — |
+| | Claude Code | Codex CLI | Kimi Code | Gemini CLI | Antigravity CLI | MCP agents |
+|---|---|---|---|---|---|---|
+| Entry file | `~/.claude/CLAUDE.md` | `~/.codex/AGENTS.md` | `~/.kimi-code/AGENTS.md` | `~/.gemini/GEMINI.md` | `~/.gemini/GEMINI.md` (shared) | System prompt |
+| Echo trigger | `PostToolUse Write\|Edit` | `UserPromptSubmit` snapshot + `Stop` diff | `BeforeAgent` snapshot + `AfterAgent` deny/retry | `PreInvocation` snapshot + `Stop` continue | — |
+| Per-project scaffold | `.claude/settings.json` | `.codex/hooks.json` | `.kimi-code/AGENTS.md` (user-level hooks) | `GEMINI.md` (user-level hooks) | `GEMINI.md` (hooks in `~/.gemini/config/hooks.json`) | — |
 
 The Codex adapter uses a **snapshot + diff** loop (including edits made through `apply_patch` or shell commands): `UserPromptSubmit` fingerprints memory/topics/shortwave before each turn; `Stop` diffs against that fingerprint and uses `decision: block` with a continuation prompt if any step in the Echo chain was skipped.
 
@@ -163,6 +163,8 @@ First-run permissions still belong to the client. In Codex, review new or change
 Kimi Code 2.3.3 integration requires **Python 3.11+**: UserPromptSubmit injects context, Stop uses exit code 2 for continuation, and existing models/custom hooks are preserved. Default `both` remains CC + Codex; use `all` for three runtimes. See [Kimi setup, validation and lifecycle limits](docs/kimi-code.md).
 
 Gemini CLI 0.70 integration: `SessionStart` injects context, `AfterAgent` denies once to request the Echo continuation, and other `settings.json` keys and hooks are preserved. `all` now installs all four runtimes. See [Gemini setup, validation and lifecycle limits](docs/gemini-cli.md).
+
+Antigravity CLI (`agy`) 1.5.14 integration: `SessionStart` injects context, `Stop` returns `continue` once for the Echo continuation, and other named hooks in `~/.gemini/config/hooks.json` are preserved. It shares the global `~/.gemini/GEMINI.md` rules section with Gemini CLI. See [Antigravity setup, validation and lifecycle limits](docs/antigravity-cli.md).
 
 Python hooks target **Python 3.7+** (`from __future__ import annotations`). Snapshot walker caps at 10k files with 24h TTL cleanup.
 
@@ -184,7 +186,8 @@ That's it. Start Claude Code or Codex in any project — hooks fire, rules are l
 ./install.sh --runtime both     # default: CC + Codex
 ./install.sh --runtime kimi     # only Kimi Code
 ./install.sh --runtime gemini   # only Gemini CLI
-./install.sh --runtime all      # all four runtimes
+./install.sh --runtime antigravity  # only Antigravity CLI
+./install.sh --runtime all      # every runtime
 ```
 
 Optionally, run `radioheader init` inside a project for per-project scaffolding (Echo rules, log directory, doc templates).
@@ -200,9 +203,9 @@ radioheader index --rebuild  # rebuild derived search data if needed
 radioheader consolidate --native
 ```
 
-Version 2.6.0 adds Gemini CLI integration (`--runtime gemini|all`). Version 2.5.0 adds Kimi Code integration (`--runtime kimi|all`). Version 2.4.1 adds Codex native digest refresh every five changed memory turns, refreshes generated device-sync adapters during reinstall without changing sync preferences, and repairs incremental FTS updates, separates local/community IDs, restores registry backups, fixes Codex memory paths and background opt-in, and removes author-specific template paths. `doctor` checks FTS integrity on a read-only snapshot and exits nonzero when issues are found.
+Version 2.7.0 adds Antigravity CLI integration (`--runtime antigravity|all`). Version 2.6.0 adds Gemini CLI integration (`--runtime gemini|all`). Version 2.5.0 adds Kimi Code integration (`--runtime kimi|all`). Version 2.4.1 adds Codex native digest refresh every five changed memory turns, refreshes generated device-sync adapters during reinstall without changing sync preferences, and repairs incremental FTS updates, separates local/community IDs, restores registry backups, fixes Codex memory paths and background opt-in, and removes author-specific template paths. `doctor` checks FTS integrity on a read-only snapshot and exits nonzero when issues are found.
 
-Run the local suite with `python3 -m unittest discover -s tests -p 'test_maintenance.py'`, `python3 -m unittest discover -s tests -p 'test_gemini.py'`, `test_kimi.py` (Python 3.11+), `python3 tests/test_digest_quality.py`, `bash tests/test_auto_digest.sh`, and `bash tests/test_device_sync.sh`.
+Run the local suite with `python3 -m unittest discover -s tests -p 'test_maintenance.py'`, `python3 -m unittest discover -s tests -p 'test_gemini.py'`, `test_antigravity.py`, `test_kimi.py` (Python 3.11+), `python3 tests/test_digest_quality.py`, `bash tests/test_auto_digest.sh`, and `bash tests/test_device_sync.sh`.
 
 ## Use
 
@@ -225,7 +228,7 @@ radioheader doctor
 | Command | What it does |
 |---------|-------------|
 | `search <query>` | BM25 + synonym search across topics, shortwave, community |
-| `init` | Project scaffolding (`--runtime claude\|codex\|kimi\|gemini\|both\|all`) |
+| `init` | Project scaffolding (`--runtime claude\|codex\|kimi\|gemini\|antigravity\|both\|all`) |
 | `index [--rebuild]` | Build/update FTS5 search index |
 | `learn <url>` | Extract article into shortwave entry |
 | `consolidate` | Update attention weights and context digest |

@@ -166,3 +166,7 @@ Kimi reuses the snapshot engine with its own state directory and consolidation c
 ### Gemini CLI adapter (2.6)
 
 Gemini reuses the same snapshot engine with its own state directory and consolidation counter. `SessionStart` returns `hookSpecificOutput.additionalContext`; `BeforeAgent` takes the per-prompt baseline; `AfterAgent` returns `decision: "deny"`, which Gemini feeds back as a retry prompt, and the `stop_hook_active` pass is never re-checked. Hooks in `~/.gemini/settings.json` are owned by exact command and merged without touching other settings. See [Gemini CLI integration](gemini-cli.md).
+
+### Antigravity CLI adapter (2.7)
+
+Antigravity has no per-prompt hook: `PreInvocation` fires per model call, so the adapter snapshots only when `invocationNum` is 0. `Stop` returns `decision: "continue"` to request the Echo continuation; agy provides no loop guard, so the adapter keeps a per-conversation marker. Shell failures are queued at `PostToolUse` and read from the transcript at `Stop`, because the exit code is only written there. Global rules share `~/.gemini/GEMINI.md` with Gemini CLI. See [Antigravity CLI integration](antigravity-cli.md).

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-# RadioHeader — Cross-project memory framework for Claude Code, Codex, Kimi Code, and Gemini CLI
+# RadioHeader — Cross-project memory framework for Claude Code, Codex, Kimi Code, Gemini CLI, and Antigravity CLI
 # https://github.com/ZaptainZ/radioheader
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -59,7 +59,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --help|-h)
       cat <<EOF
-Usage: ./install.sh [--runtime claude|codex|kimi|gemini|both|all] [--yes] [--bin-dir /absolute/path]
+Usage: ./install.sh [--runtime claude|codex|kimi|gemini|antigravity|both|all] [--yes] [--bin-dir /absolute/path]
 --yes reinstalls without prompts, preserving the community preference (default off).
 EOF
       exit 0
@@ -72,9 +72,9 @@ EOF
 done
 
 case "$RUNTIME" in
-  claude|codex|kimi|gemini|both|all) ;;
+  claude|codex|kimi|gemini|antigravity|both|all) ;;
   *)
-    err "Invalid runtime: $RUNTIME (expected claude, codex, kimi, gemini, both, or all)"
+    err "Invalid runtime: $RUNTIME (expected claude, codex, kimi, gemini, antigravity, both, or all)"
     exit 1
     ;;
 esac
@@ -95,6 +95,13 @@ gemini_enabled() {
   [ "$RUNTIME" = "gemini" ] || [ "$RUNTIME" = "all" ]
 }
 
+# Antigravity CLI reads ~/.gemini/GEMINI.md (shared with Gemini CLI) and
+# hooks from ~/.gemini/config/hooks.json. It has no config-home override.
+AGY_DIR="$HOME/.gemini"
+antigravity_enabled() {
+  [ "$RUNTIME" = "antigravity" ] || [ "$RUNTIME" = "all" ]
+}
+
 # Parse TOML before changing any runtime files. Kimi keeps provider credentials
 # here, so invalid config must be preserved and reported, never reset.
 if kimi_enabled; then
@@ -111,6 +118,9 @@ fi
 # JSON) before any runtime file is touched.
 if gemini_enabled; then
   python3 "$SCRIPT_DIR/gemini-config.py" validate --config "$GEMINI_DIR/settings.json"
+fi
+if antigravity_enabled; then
+  python3 "$SCRIPT_DIR/antigravity-config.py" validate --config "$AGY_DIR/config/hooks.json"
 fi
 
 append_managed_section() {
@@ -355,6 +365,8 @@ cp "$SCRIPT_DIR/templates/hooks/radioheader-kimi.py" "$HOOKS_DIR/radioheader-kim
 chmod +x "$HOOKS_DIR/radioheader-kimi.py"
 cp "$SCRIPT_DIR/templates/hooks/radioheader-gemini.py" "$HOOKS_DIR/radioheader-gemini.py"
 chmod +x "$HOOKS_DIR/radioheader-gemini.py"
+cp "$SCRIPT_DIR/templates/hooks/radioheader-antigravity.py" "$HOOKS_DIR/radioheader-antigravity.py"
+chmod +x "$HOOKS_DIR/radioheader-antigravity.py"
 ok "Installed shared runtime hook scripts"
 
 # --- Step 3: Append rules to CLAUDE.md ---
@@ -565,6 +577,15 @@ if gemini_enabled; then
   ok "Merged RadioHeader hooks into $GEMINI_DIR/settings.json (other settings preserved)"
 fi
 
+if antigravity_enabled; then
+  # Same rules file as Gemini CLI: write the managed section only once.
+  if ! { gemini_enabled && [ "$GEMINI_DIR" = "$AGY_DIR" ]; }; then
+    append_managed_section "$AGY_DIR/GEMINI.md" "$SCRIPT_DIR/templates/global-agents-md.md" "Antigravity GEMINI.md"
+  fi
+  python3 "$SCRIPT_DIR/antigravity-config.py" install --config "$AGY_DIR/config/hooks.json"
+  ok "Merged RadioHeader hooks into $AGY_DIR/config/hooks.json (other hooks preserved)"
+fi
+
 # --- Step 5: Install CLI ---
 
 CLI_INSTALLED=""
@@ -636,7 +657,7 @@ echo ""
 info "Running post-install initialization..."
 
 # Copy Python scripts alongside CLI
-for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py gemini-config.py; do
+for pyfile in fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py gemini-config.py antigravity-config.py; do
   if [ -f "$SCRIPT_DIR/$pyfile" ]; then
     cp "$SCRIPT_DIR/$pyfile" "$(dirname "$CLI_INSTALLED")/$pyfile"
     if [[ "$pyfile" == "radioheader-mcp-server.py" ]]; then
@@ -728,11 +749,13 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "What's next:"
 if [ "$RUNTIME" = "all" ]; then
-  echo "  1. Open Claude Code, Codex, Kimi Code, or Gemini CLI; follow client permission prompts"
+  echo "  1. Open Claude Code, Codex, Kimi Code, Gemini CLI, or Antigravity CLI; follow client permission prompts"
 elif [ "$RUNTIME" = "kimi" ]; then
   echo "  1. Open Kimi Code in a project; global rules and hooks are installed"
 elif [ "$RUNTIME" = "gemini" ]; then
   echo "  1. Open Gemini CLI in a project; global rules and hooks are installed"
+elif [ "$RUNTIME" = "antigravity" ]; then
+  echo "  1. Open Antigravity CLI (agy) in a project; global rules and hooks are installed"
 elif [ "$RUNTIME" = "both" ]; then
   echo "  1. Open any project with Claude Code or Codex — RadioHeader is already active"
 elif [ "$RUNTIME" = "claude" ]; then
@@ -780,4 +803,8 @@ fi
 if gemini_enabled; then
   echo "  Gemini rules: $GEMINI_DIR/GEMINI.md"
   echo "  Gemini hooks: $GEMINI_DIR/settings.json"
+fi
+if antigravity_enabled; then
+  echo "  Antigravity rules: $AGY_DIR/GEMINI.md"
+  echo "  Antigravity hooks: $AGY_DIR/config/hooks.json"
 fi

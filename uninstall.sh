@@ -11,6 +11,7 @@ CLAUDE_MD="$CLAUDE_DIR/CLAUDE.md"
 SETTINGS_JSON="$CLAUDE_DIR/settings.json"
 KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 GEMINI_DIR="${GEMINI_CLI_HOME:-$HOME}/.gemini"
+AGY_DIR="$HOME/.gemini"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CODEX_DIR="$HOME/.codex"
 CODEX_AGENTS="$CODEX_DIR/AGENTS.md"
@@ -39,14 +40,14 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     *)
-      echo "Usage: ./uninstall.sh [--runtime claude|codex|kimi|gemini|both|all]"
+      echo "Usage: ./uninstall.sh [--runtime claude|codex|kimi|gemini|antigravity|both|all]"
       exit 1
       ;;
   esac
 done
 
 case "$RUNTIME" in
-  claude|codex|kimi|gemini|both|all) ;;
+  claude|codex|kimi|gemini|antigravity|both|all) ;;
   *)
     echo "Invalid runtime: $RUNTIME"
     exit 1
@@ -69,14 +70,22 @@ gemini_enabled() {
   [ "$RUNTIME" = "gemini" ] || [ "$RUNTIME" = "all" ]
 }
 
+antigravity_enabled() {
+  [ "$RUNTIME" = "antigravity" ] || [ "$RUNTIME" = "all" ]
+}
+
+gemini_installed() { grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null; }
+antigravity_installed() { grep -q 'radioheader-antigravity.py' "$AGY_DIR/config/hooks.json" 2>/dev/null; }
+
 # "both" retains its original CC+Codex meaning. Never remove shared engines
-# when an installed Kimi or Gemini runtime still depends on them.
+# when an installed Kimi, Gemini or Antigravity runtime still depends on them.
 FULL_UNINSTALL=false
 if [ "$RUNTIME" = "all" ] || { [ "$RUNTIME" = "both" ] &&
     ! grep -q 'RadioHeader START' "$KIMI_DIR/AGENTS.md" 2>/dev/null &&
     ! grep -q 'radioheader-kimi.py' "$KIMI_DIR/config.toml" 2>/dev/null &&
     ! grep -q 'RadioHeader START' "$GEMINI_DIR/GEMINI.md" 2>/dev/null &&
-    ! grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null; }; then
+    ! grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null &&
+    ! antigravity_installed; }; then
   FULL_UNINSTALL=true
 fi
 
@@ -93,6 +102,9 @@ if kimi_enabled; then
 fi
 if gemini_enabled; then
   python3 "$SCRIPT_DIR/gemini-config.py" remove --config "$GEMINI_DIR/settings.json"
+fi
+if antigravity_enabled; then
+  python3 "$SCRIPT_DIR/antigravity-config.py" remove --config "$AGY_DIR/config/hooks.json"
 fi
 
 remove_managed_section() {
@@ -193,15 +205,25 @@ if kimi_enabled; then
   rm -f "$HOOKS_DIR/radioheader-kimi.py"
 fi
 
+# Gemini CLI and Antigravity CLI share ~/.gemini/GEMINI.md: keep the rules
+# section while the other runtime is still installed.
 if gemini_enabled; then
-  remove_managed_section "$GEMINI_DIR/GEMINI.md" "Gemini GEMINI.md"
+  if ! { antigravity_installed && [ "$GEMINI_DIR" = "$AGY_DIR" ]; }; then
+    remove_managed_section "$GEMINI_DIR/GEMINI.md" "Gemini GEMINI.md"
+  fi
   rm -f "$HOOKS_DIR/radioheader-gemini.py"
+fi
+if antigravity_enabled; then
+  if ! { gemini_installed && [ "$GEMINI_DIR" = "$AGY_DIR" ]; }; then
+    remove_managed_section "$AGY_DIR/GEMINI.md" "Antigravity GEMINI.md"
+  fi
+  rm -f "$HOOKS_DIR/radioheader-antigravity.py"
 fi
 
 # --- Step 2: Remove shared hook scripts only on full uninstall ---
 
 if [ "$FULL_UNINSTALL" = "true" ]; then
-  rm -f "$HOOKS_DIR/radioheader-kimi.py" "$HOOKS_DIR/radioheader-gemini.py"
+  rm -f "$HOOKS_DIR/radioheader-kimi.py" "$HOOKS_DIR/radioheader-gemini.py" "$HOOKS_DIR/radioheader-antigravity.py"
   if [ -f "$HOOKS_DIR/check-project-architecture.sh" ]; then
     rm "$HOOKS_DIR/check-project-architecture.sh"
     ok "Removed check-project-architecture.sh"
@@ -326,7 +348,7 @@ fi
 
 # --- Step 5: Remove CLI and companion scripts ---
 
-COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py gemini-config.py"
+COMPANION_SCRIPTS="fts-index.py fts-search.py attn-consolidate.py radioheader-mcp-server.py kimi-config.py gemini-config.py antigravity-config.py"
 
 remove_cli_dir() {
   local dir="$1"

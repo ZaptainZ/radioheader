@@ -1,10 +1,10 @@
 #!/bin/bash
 set -e
 
-# RadioHeader CLI — Cross-project experience sharing for Claude Code, Codex, Kimi Code, and Gemini CLI
+# RadioHeader CLI — Cross-project experience sharing for Claude Code, Codex, Kimi Code, Gemini CLI, and Antigravity CLI
 # Usage: radioheader <command> [options]
 
-VERSION="2.6.0"
+VERSION="2.7.0"
 CLAUDE_DIR="$HOME/.claude"
 RADIOHEADER_DIR="$CLAUDE_DIR/radioheader"
 TEMPLATES_DIR="$RADIOHEADER_DIR/templates/project"
@@ -23,6 +23,8 @@ CODEX_HOOKS_JSON="$CODEX_DIR/hooks.json"
 KIMI_DIR="${KIMI_CODE_HOME:-$HOME/.kimi-code}"
 # GEMINI_CLI_HOME replaces the home directory; Gemini appends .gemini itself.
 GEMINI_DIR="${GEMINI_CLI_HOME:-$HOME}/.gemini"
+# Antigravity CLI has no config-home override.
+AGY_DIR="$HOME/.gemini"
 
 # Default community repository (users can override in config.json)
 DEFAULT_COMMUNITY_REPO="https://github.com/ZaptainZ/radioheader-community.git"
@@ -127,12 +129,21 @@ check_kimi_runtime() {
 }
 
 gemini_runtime_enabled() {
-  grep -q "RadioHeader START" "$GEMINI_DIR/GEMINI.md" 2>/dev/null ||
-    grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null
+  # ~/.gemini/GEMINI.md is shared with Antigravity CLI, so only Gemini's own
+  # hooks prove that the Gemini runtime is installed.
+  grep -q 'radioheader-gemini.py' "$GEMINI_DIR/settings.json" 2>/dev/null
 }
 
 check_gemini_runtime() {
   python3 "$(dirname "${BASH_SOURCE[0]}")/gemini-config.py" check --config "$GEMINI_DIR/settings.json"
+}
+
+antigravity_runtime_enabled() {
+  grep -q 'radioheader-antigravity.py' "$AGY_DIR/config/hooks.json" 2>/dev/null
+}
+
+check_antigravity_runtime() {
+  python3 "$(dirname "${BASH_SOURCE[0]}")/antigravity-config.py" check --config "$AGY_DIR/config/hooks.json"
 }
 
 sync_hooks_registered() {
@@ -140,7 +151,8 @@ sync_hooks_registered() {
   grep -q "radioheader-git-sync.sh" "$CLAUDE_DIR/settings.json" 2>/dev/null ||
     grep -q "radioheader-git-sync.sh" "$CODEX_HOOKS_JSON" 2>/dev/null ||
     { kimi_runtime_enabled && check_kimi_runtime >/dev/null 2>&1; } ||
-    { gemini_runtime_enabled && check_gemini_runtime >/dev/null 2>&1; }
+    { gemini_runtime_enabled && check_gemini_runtime >/dev/null 2>&1; } ||
+    { antigravity_runtime_enabled && check_antigravity_runtime >/dev/null 2>&1; }
 }
 
 project_runtime_summary() {
@@ -232,7 +244,7 @@ cmd_help() {
   cat <<EOF
 
 ${BOLD}RadioHeader CLI${NC} v${VERSION}
-Cross-project experience sharing for Claude Code, Codex, Kimi Code, and Gemini CLI
+Cross-project experience sharing for Claude Code, Codex, Kimi Code, Gemini CLI, and Antigravity CLI
 
 ${BOLD}USAGE${NC}
   radioheader <command> [options]
@@ -316,7 +328,7 @@ ${BOLD}FLAGS${NC}
   --stack <stack>    Tech stack, e.g. "iOS/SwiftUI" (required)
   --doc-dir <dir>   Documentation directory name (default: projectBasicInfo)
   --terms <terms>   Terminology mappings (optional)
-  --runtime <mode>  claude | codex | kimi | gemini | both | all (default: both)
+  --runtime <mode>  claude | codex | kimi | gemini | antigravity | both | all (default: both)
 
 ${BOLD}INTERACTIVE MODE${NC}
   Run without flags to be prompted for each value.
@@ -338,9 +350,9 @@ EOF
   fi
 
   case "$runtime" in
-    claude|codex|kimi|gemini|both|all) ;;
+    claude|codex|kimi|gemini|antigravity|both|all) ;;
     *)
-      err "Invalid runtime: $runtime (expected claude, codex, kimi, gemini, both, or all)"
+      err "Invalid runtime: $runtime (expected claude, codex, kimi, gemini, antigravity, both, or all)"
       return 1
       ;;
   esac
@@ -453,8 +465,8 @@ EOF
     fi
   fi
 
-  # GEMINI.md — Gemini CLI's default project context file
-  if [ "$runtime" = "gemini" ] || [ "$runtime" = "all" ]; then
+  # GEMINI.md — project context for Gemini CLI and Antigravity CLI
+  if [ "$runtime" = "gemini" ] || [ "$runtime" = "antigravity" ] || [ "$runtime" = "all" ]; then
     if [ -f GEMINI.md ]; then
       warn "GEMINI.md already exists, skipping (not overwriting)"
     else
@@ -463,7 +475,7 @@ EOF
       sedi "s|__TECH_STACK__|$tech_stack|g" GEMINI.md
       sedi "s|__TERMINOLOGY__|$terminology|g" GEMINI.md
       sedi "s|__DOC_DIR__|$doc_dir|g" GEMINI.md
-      ok "Created GEMINI.md (Gemini hooks remain user-level)"
+      ok "Created GEMINI.md (Gemini/Antigravity hooks remain user-level)"
     fi
   fi
 
@@ -699,7 +711,7 @@ with open('$REGISTRY_JSON', 'w') as f:
   if [ "$runtime" = "kimi" ] || [ "$runtime" = "all" ]; then
     echo "  .kimi-code/AGENTS.md"
   fi
-  if [ "$runtime" = "gemini" ] || [ "$runtime" = "all" ]; then
+  if [ "$runtime" = "gemini" ] || [ "$runtime" = "antigravity" ] || [ "$runtime" = "all" ]; then
     echo "  GEMINI.md"
   fi
   echo "  .claude/rules/{memory-echo,logs-writing,information-lookup}.md"
@@ -712,6 +724,8 @@ with open('$REGISTRY_JSON', 'w') as f:
     echo "Next: Open Kimi Code (install --runtime kimi or all for global hooks)."
   elif [ "$runtime" = "gemini" ]; then
     echo "Next: Open Gemini CLI (install --runtime gemini or all for global hooks)."
+  elif [ "$runtime" = "antigravity" ]; then
+    echo "Next: Open Antigravity CLI (install --runtime antigravity or all for global hooks)."
   elif [ "$runtime" = "both" ]; then
     echo "Next: Open this project with Claude Code or Codex to start using RadioHeader."
   elif [ "$runtime" = "claude" ]; then
@@ -1315,6 +1329,10 @@ PY
     echo -e "  Gemini runtime enabled ($GEMINI_DIR)"
     check_gemini_runtime || true
   fi
+  if antigravity_runtime_enabled; then
+    echo -e "  Antigravity runtime enabled ($AGY_DIR/config/hooks.json)"
+    check_antigravity_runtime || true
+  fi
   echo -e "  Project runtime: $(project_runtime_summary)"
 
   echo ""
@@ -1538,6 +1556,15 @@ cmd_doctor() {
       echo -e "  ${GREEN}✓${NC} Gemini runtime configured"
     else
       echo -e "  ${RED}✗${NC} Gemini runtime needs repair"
+      issues=$((issues + 1))
+    fi
+  fi
+
+  if antigravity_runtime_enabled; then
+    if check_antigravity_runtime; then
+      echo -e "  ${GREEN}✓${NC} Antigravity runtime configured"
+    else
+      echo -e "  ${RED}✗${NC} Antigravity runtime needs repair"
       issues=$((issues + 1))
     fi
   fi
@@ -3439,6 +3466,9 @@ pending-publish/
 .gemini-consolidate-counter
 .gemini-consolidate.log
 .gemini-sync.log
+.antigravity-turn-snapshots/
+.antigravity-consolidate-counter
+.antigravity-consolidate.log
 .digest-rebuilding
 .radiomind-suggested
 .sync.lock
@@ -3679,7 +3709,7 @@ _sync_hooks_json() {
   # Kimi's and Gemini's permanent lifecycle adapters delegate sync behind the
   # existing opt-in gate. Do not accidentally enable Claude on their installs.
   if [ -f "$SYNC_SETTINGS_JSON" ] || [ -f "$CLAUDE_DIR/CLAUDE.md" ] ||
-      { ! kimi_runtime_enabled && ! gemini_runtime_enabled; }; then
+      { ! kimi_runtime_enabled && ! gemini_runtime_enabled && ! antigravity_runtime_enabled; }; then
     _sync_hooks_json_one "$mode" "$SYNC_SETTINGS_JSON" ""
   fi
   if [ -f "$CODEX_HOOKS_JSON" ]; then
@@ -4923,7 +4953,7 @@ PY
     local has_kimi=false
     [ -d "$ppath/.kimi-code" ] && has_kimi=true
     local has_gemini=false
-    { [ -f "$ppath/GEMINI.md" ] || [ -d "$ppath/.gemini" ]; } && has_gemini=true
+    { [ -f "$ppath/GEMINI.md" ] || [ -d "$ppath/.gemini" ] || [ -d "$ppath/.agents" ]; } && has_gemini=true
     if [ -f "$ppath/CLAUDE.md" ] || [ -f "$ppath/.claude/settings.json" ]; then
       has_claude=true
     fi

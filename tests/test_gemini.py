@@ -24,8 +24,9 @@ class GeminiTests(unittest.TestCase):
         harness.mkdir()
         self.uninstaller = harness / 'uninstall.sh'
         self.uninstaller.write_text((ROOT / 'uninstall.sh').read_text().replace('/usr/local/bin', str(self.home / 'system-bin')))
-        for helper in ('kimi-config.py', 'gemini-config.py'):
-            shutil.copy2(ROOT / helper, harness / helper)
+        # The uninstaller calls every runtime's config helper next to itself.
+        for helper in ROOT.glob('*-config.py'):
+            shutil.copy2(helper, harness / helper.name)
         self.gemini = self.home / '.gemini'
         self.gemini.mkdir()
         self.settings = self.gemini / 'settings.json'

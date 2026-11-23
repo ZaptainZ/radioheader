@@ -22,6 +22,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -p 'test_maintenance.py' -v
       - run: python3 -m unittest discover -s tests -p 'test_kimi.py' -v
       - run: python3 -m unittest discover -s tests -p 'test_gemini.py' -v
+      - run: python3 -m unittest discover -s tests -p 'test_antigravity.py' -v
       - run: python3 tests/test_digest_quality.py
       - run: bash tests/test_auto_digest.sh
       - run: bash tests/test_device_sync.sh

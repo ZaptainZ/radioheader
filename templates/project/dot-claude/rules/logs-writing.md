@@ -20,6 +20,7 @@
 | Codex | `codex` |
 | Kimi Code | `kimi` |
 | Gemini CLI | `gemini` |
+| Antigravity CLI | `antigravity` |
 | Other AI agent | the agent's short name (e.g. `cursor`, `aider`) |
 | Human author | your initials or short name (e.g. `zt`, `alex`) |
 

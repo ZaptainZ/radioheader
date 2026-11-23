@@ -159,12 +159,34 @@ def update(path, remove=False, dry_run=False):
             os.unlink(tmp)
 
 
+def normalize(value, problems):
+    """Compare hook commands by script + event; the recorded interpreter may
+    legitimately differ from the one running this check, but must still exist."""
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if key == 'command' and isinstance(item, str):
+                try:
+                    args = shlex.split(item)
+                except ValueError:
+                    args = []
+                if len(args) == 3 and Path(args[1]).name == SCRIPT_NAME:
+                    if not os.access(args[0], os.X_OK):
+                        problems.append('hook interpreter missing: ' + args[0])
+                    item = args[1] + ' ' + args[2]
+            out[key] = normalize(item, problems)
+        return out
+    if isinstance(value, list):
+        return [normalize(item, problems) for item in value]
+    return value
+
+
 def check(path):
     data = load(path)
     problems = []
-    current = owned_hooks(data)
+    current = normalize(owned_hooks(data), problems)
     for event, group in expected_groups().items():
-        if group['hooks'][0] not in current.get(event, []):
+        if normalize(group['hooks'][0], []) not in current.get(event, []):
             problems.append(event)
     config = data.get('hooksConfig', {})
     if isinstance(config, dict):
