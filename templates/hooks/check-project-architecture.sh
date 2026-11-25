@@ -9,7 +9,8 @@
 # 询问只问一个问题：项目名（默认目录名）。技术栈/术语映射/文档目录都用默认值，
 # 避免在 onboarding 时一次问 4 个问题骚扰用户。
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
+# Resolve "." before taking the basename when the runtime omits the project path.
+PROJECT_DIR=$(CDPATH= cd -- "${CLAUDE_PROJECT_DIR:-.}" && pwd -L) || exit 0
 MARKER_FILE="$PROJECT_DIR/.claude/rules/memory-echo.md"
 
 if [ ! -f "$MARKER_FILE" ]; then

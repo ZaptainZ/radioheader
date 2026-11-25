@@ -72,6 +72,29 @@ class MaintenanceTests(unittest.TestCase):
         p.write_text('---\nid: ' + identifier + '\ndomain: test\ntags: [test]\n---\n# Probe\n' + text)
         return p
 
+    def test_onboarding_uses_project_directory_name(self):
+        project = self.home / '示例 Project'
+        project.mkdir()
+        hook = ROOT / 'templates/hooks/check-project-architecture.sh'
+        env = self.env.copy()
+        env.pop('CLAUDE_PROJECT_DIR', None)
+
+        def run_hook(cwd):
+            return subprocess.check_output(['bash', str(hook)], cwd=cwd, env=env, text=True)
+
+        for cwd, project_dir in [(project, None), (project, '.'), (self.home, project.name)]:
+            with self.subTest(project_dir=project_dir):
+                if project_dir is not None:
+                    env['CLAUDE_PROJECT_DIR'] = project_dir
+                context = json.loads(run_hook(cwd))['hookSpecificOutput']['additionalContext']
+                self.assertIn(f'项目名默认用「{project.name}」', context)
+
+        marker = project / '.claude/rules/memory-echo.md'
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+        env['CLAUDE_PROJECT_DIR'] = str(project)
+        self.assertEqual(run_hook(self.home), '')
+
     def test_edit_and_delete_sections_remove_old_postings(self):
         p = self.data / 'topics/test.md'
         p.write_text('# Test\n\n## First\noldneedle\n\n## Second\nghostneedle\n')
